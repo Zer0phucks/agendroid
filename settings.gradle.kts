@@ -25,3 +25,6 @@ include(":core:telephony")
 include(":feature:sms")
 include(":feature:phone")
 include(":feature:assistant")
+
+// Spike modules — debug/validation only, not shipped
+include(":spike:call-pipeline")
