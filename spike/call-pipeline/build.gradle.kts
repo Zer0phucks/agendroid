@@ -42,7 +42,7 @@ dependencies {
     // MediaPipe Tasks GenAI — LLM inference on GPU
     // Check https://developers.google.com/mediapipe/solutions/genai/llm_inference/android
     // for latest stable version before building.
-    implementation("com.google.mediapipe:tasks-genai:0.10.14")
+    implementation("com.google.mediapipe:tasks-genai:0.10.32")
 
     testImplementation(libs.bundles.junit5)
     testRuntimeOnly(libs.junit5.engine)
