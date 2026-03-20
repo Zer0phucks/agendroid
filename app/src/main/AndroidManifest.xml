@@ -35,6 +35,9 @@
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
     <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
 
+    <!-- Hardware features — required="false" so app installs on non-phone devices -->
+    <uses-feature android:name="android.hardware.telephony" android:required="false" />
+
     <!-- ================================================================
          APPLICATION
          Plans 3-8 add <service>, <receiver>, and <activity> entries here.
