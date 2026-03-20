@@ -22,7 +22,7 @@ import java.util.Locale
 import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
 
-private const val MODEL_PATH = "/sdcard/Download/agendroid-spike/gemma3-1b-it-int4.task"
+private const val MODEL_FILENAME = "gemma3-1b-it-int4.task"
 
 // 20 canned caller utterances — simulates what a caller would say each turn
 private val CALLER_UTTERANCES = listOf(
@@ -61,9 +61,10 @@ class Phase3PipelineActivity : ComponentActivity() {
             ttsReady.value = status == TextToSpeech.SUCCESS
             tts?.language = Locale.US
         }
+        val modelPath = "${getExternalFilesDir(null)?.absolutePath}/$MODEL_FILENAME"
         setContent {
             MaterialTheme {
-                Phase3Screen(scope, applicationContext, MODEL_PATH, tts, ttsReady)
+                Phase3Screen(scope, applicationContext, modelPath, tts, ttsReady)
             }
         }
     }
