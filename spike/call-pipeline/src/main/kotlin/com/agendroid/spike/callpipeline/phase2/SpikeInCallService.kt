@@ -85,6 +85,7 @@ class SpikeInCallService : InCallService() {
                 var frameCount = 0
                 while (isActive) {
                     val read = audioRecord?.read(buffer, 0, buffer.size) ?: break
+                    if (read < 0) break  // stop loop on AudioRecord error
                     if (read > 0) {
                         audioTrack?.write(buffer, 0, read)
                         frameCount++
@@ -112,13 +113,19 @@ class SpikeInCallService : InCallService() {
     }
 
     private fun stopAudio() {
-        recordingJob?.cancel()
-        audioRecord?.stop()
-        audioRecord?.release()
+        val job = recordingJob
+        val record = audioRecord
+        val track = audioTrack
+        recordingJob = null
         audioRecord = null
-        audioTrack?.stop()
-        audioTrack?.release()
         audioTrack = null
+        scope.launch {
+            job?.cancelAndJoin()   // wait for the coroutine to exit before releasing
+            record?.stop()
+            record?.release()
+            track?.stop()
+            track?.release()
+        }
     }
 
     override fun onDestroy() {
