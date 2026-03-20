@@ -64,6 +64,8 @@ private fun Phase2Screen(
                 appendLine("4. Watch adb logcat for:")
                 appendLine("   • 'SpikeCallScreening: Call intercepted' — confirms CallScreeningService works")
                 appendLine("   • 'SpikeInCallService: First audio frame captured' — confirms AudioRecord works")
+                appendLine("   NOTE: The 'Measure Takeover' button below is a lower-bound estimate.")
+                appendLine("   For the authoritative ≤200ms gate, read the logcat output from a live call.")
                 appendLine()
                 appendLine("5. Tap 'Measure Takeover' to benchmark the AI→user handoff time.")
             },
@@ -103,7 +105,11 @@ private fun Phase2Screen(
 
 /** Measures the time to stop audio capture and switch AudioManager mode to IN_CALL.
  *  This simulates the AI→user handoff without requiring a live call.
- *  A live call measurement can be done via adb logcat from SpikeInCallService. */
+ *  A live call measurement can be done via adb logcat from SpikeInCallService.
+ *
+ * NOTE: Uses AudioSource.MIC in normal audio mode (not VOICE_COMMUNICATION in telephony mode).
+ * This measures a lower-bound estimate only. For the authoritative gate measurement,
+ * use a live call and read 'Take-over handoff complete in Xms' from logcat (SpikeInCallService). */
 private suspend fun measureTakeoverHandoff(context: android.content.Context): Long = withContext(Dispatchers.IO) {
     val sampleRate = 16_000
     val bufferSize = AudioRecord.getMinBufferSize(
