@@ -1,14 +1,8 @@
 // spike/call-pipeline/src/main/kotlin/com/agendroid/spike/callpipeline/phase3/Phase3PipelineActivity.kt
 package com.agendroid.spike.callpipeline.phase3
 
-import android.content.Intent
-import android.media.AudioManager
 import android.os.Bundle
-import android.speech.RecognitionListener
-import android.speech.RecognizerIntent
-import android.speech.SpeechRecognizer
 import android.speech.tts.TextToSpeech
-import android.util.Log
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.layout.*
@@ -16,6 +10,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.State
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import com.agendroid.spike.callpipeline.measurement.LatencyRecorder
@@ -58,17 +53,17 @@ class Phase3PipelineActivity : ComponentActivity() {
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
     private var tts: TextToSpeech? = null
-    private var ttsReady = false
+    private val ttsReady = mutableStateOf(false)
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         tts = TextToSpeech(this) { status ->
-            ttsReady = status == TextToSpeech.SUCCESS
+            ttsReady.value = status == TextToSpeech.SUCCESS
             tts?.language = Locale.US
         }
         setContent {
             MaterialTheme {
-                Phase3Screen(scope, applicationContext, MODEL_PATH, tts)
+                Phase3Screen(scope, applicationContext, MODEL_PATH, tts, ttsReady)
             }
         }
     }
@@ -86,6 +81,7 @@ private fun Phase3Screen(
     context: android.content.Context,
     modelPath: String,
     tts: TextToSpeech?,
+    ttsReady: State<Boolean>,
 ) {
     var log by remember { mutableStateOf("Tap Start to begin 20-turn end-to-end test\n") }
     var running by remember { mutableStateOf(false) }
@@ -106,7 +102,7 @@ private fun Phase3Screen(
                     running = false
                 }
             },
-            enabled = !running,
+            enabled = !running && ttsReady.value,
         ) { Text(if (running) "Running…" else "Start Phase 3 (20 turns)") }
         Spacer(Modifier.height(16.dp))
         Box(Modifier.weight(1f)) {
@@ -136,8 +132,6 @@ private suspend fun runPhase3(
             log("--- Turn ${i + 1}/20 ---")
             log("Simulated caller: \"$utterance\"")
 
-            val turnStart = System.currentTimeMillis()
-
             // Stage 1: STT — we use the canned utterance directly (no real STT call)
             // because cloud SpeechRecognizer latency is not representative of on-device Whisper.
             // Record a placeholder 400ms (Whisper Small typical) for the pipeline total.
@@ -163,7 +157,7 @@ private suspend fun runPhase3(
             val turn = recorder.startTurn()
             turn.markStage("stt_placeholder", sttMs)
             turn.markStage("llm_full", llmResult.totalMs)
-            turn.markStage("tts", ttsMs)
+            turn.markStage("tts_delay_placeholder", ttsMs)
             turn.end()
             log("  Total: ${totalMs}ms  (stt placeholder + llm + tts)\n")
         }
