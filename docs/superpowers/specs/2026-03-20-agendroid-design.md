@@ -25,7 +25,7 @@ Agendroid presents a full replacement app UI (SMS threads, contact list, dialer,
 
 The project is structured as a **modular monorepo** — one APK, multiple Gradle modules with strict layer boundaries.
 
-```
+```text
 :app                     Entry point, Hilt DI wiring, registers as default SMS + dialer
 ├── :feature:sms         SMS thread list, conversation view, compose screen
 ├── :feature:phone       Dialer, in-call screen, call log
@@ -43,7 +43,7 @@ The project is structured as a **modular monorepo** — one APK, multiple Gradle
 ### Key Android System Components
 
 | Component | Role |
-|---|---|
+| --- | --- |
 | `AiCoreService` (Foreground Service) | Persistent service owning the LLM runtime and RAG pipeline. All feature modules bind to it. Runs with a persistent notification. Auto-restarts via `START_STICKY`. |
 | `CallScreeningService` | Intercepts incoming calls before ringing. Passes to AI agent in full-agent mode. |
 | `InCallService` | Provides the custom in-call UI with live transcript and take-over controls. |
@@ -64,12 +64,16 @@ The project is structured as a **modular monorepo** — one APK, multiple Gradle
 ### RAG Pipeline
 
 **Ingestion (background, WorkManager):**
+
 1. Data sources are read: contacts, SMS/MMS history, call logs, notes, calendar events, user-uploaded documents (PDFs, web pages)
 2. Text is chunked into 512-token segments with 50-token overlap
 3. Each chunk is embedded via `all-MiniLM-L6-v2` (22 MB, runs via LiteRT) → 384-dim float32 vector
 4. Vectors and metadata stored in `sqlite-vec` (SQLite extension, app-private, no separate process)
 
+Document ingestion (PDFs, web pages) is initiated from a **"Knowledge Base" screen** in `:feature:assistant`. The user taps "Add Document", picks a file via the system file picker or pastes a URL, and the ingestion WorkManager job is enqueued immediately.
+
 **Query (real-time, on incoming SMS or voice input):**
+
 1. Query text embedded with same MiniLM model
 2. ANN search via sqlite-vec → top-5 cosine similarity results, optionally filtered by contact
 3. Retrieved chunks + system prompt + conversation history assembled into LLM context
@@ -79,7 +83,7 @@ The project is structured as a **modular monorepo** — one APK, multiple Gradle
 ### Voice Stack
 
 | Component | Technology |
-|---|---|
+| --- | --- |
 | Speech-to-Text | Whisper Small via whisper.cpp JNI (whisper-android) |
 | Text-to-Speech | Kokoro TTS (82M params, on-device, natural voice) |
 | Wake Word | openWakeWord (free, on-device, always-listening) |
@@ -98,7 +102,7 @@ Incoming call flow:
    - LLM generates contextually appropriate response
    - Kokoro TTS speaks response back to caller via `AudioTrack`
 5. User sees a live transcript on the `InCallService` screen at all times
-6. User can tap **"Take Over"** at any moment to join the call directly
+6. User can tap **"Take Over"** at any moment — the AI audio stream is immediately silenced, the microphone is handed to the user's earpiece, and the call continues normally as a standard voice call. The transcript remains visible but the AI stops generating responses.
 7. Post-call: AI generates a summary, logs it to Room DB and RAG, suggests follow-up actions
 
 Autonomy for calls is independently configurable: full agent, screen-only (AI screens but user decides to answer), or pass-through (standard behavior).
@@ -110,12 +114,13 @@ Autonomy for calls is independently configurable: full agent, screen-only (AI sc
 Autonomy is configurable globally and overridable per-contact.
 
 | Level | Behavior | Cancel mechanism |
-|---|---|---|
+| --- | --- | --- |
 | **Auto** | AI sends reply after a 10-second delay | Notification with "Cancel" action within window |
-| **Semi** | AI shows draft reply in a notification, waits for user approval tap | Indefinite — draft expires after 24h |
+| **Semi** | AI shows draft reply in a notification, waits for user approval tap | Draft expires after 24h and is silently discarded; the original message remains unread in the thread |
 | **Manual** | Notification only, no draft generated | N/A |
 
 **SMS flow:**
+
 1. `SmsReceiver` fires on incoming message
 2. `AiCoreService` runs RAG retrieval for sender context
 3. LLM drafts reply matching the established tone of prior conversation with that contact
@@ -128,7 +133,7 @@ Autonomy is configurable globally and overridable per-contact.
 ### Storage
 
 | Data | Storage location | Access |
-|---|---|---|
+| --- | --- | --- |
 | SMS / MMS | Android SMS Provider | Read/write (as default SMS app) |
 | Contacts | Android ContactsProvider | Read-only mirror |
 | Call logs | Android CallLog Provider | Read/write |
@@ -151,10 +156,12 @@ All data remains on-device. No data is transmitted to external servers unless th
 ## 7. Required Android Permissions
 
 ### Default App Roles (manual user action in Settings)
+
 - `DEFAULT_SMS_APP`
 - `DEFAULT_DIALER`
 
 ### Runtime Permissions
+
 - **Telephony:** `READ_PHONE_STATE`, `CALL_PHONE`, `READ_CALL_LOG`, `WRITE_CALL_LOG`, `ANSWER_PHONE_CALLS`, `MANAGE_OWN_CALLS`
 - **SMS:** `SEND_SMS`, `RECEIVE_SMS`, `READ_SMS`, `WRITE_SMS`
 - **Contacts & Calendar:** `READ_CONTACTS`, `READ_CALENDAR`
@@ -168,6 +175,7 @@ All data remains on-device. No data is transmitted to external servers unless th
 ## 8. Testing Strategy
 
 ### Unit Tests (JVM — JUnit 5 + MockK + Coroutines Test)
+
 - RAG chunker: correct token boundary detection, no chunk exceeds limit
 - Embedding pipeline: output dimensions match expected (384), deterministic for same input
 - Prompt builder: context window limits respected, correct assembly order
@@ -175,12 +183,14 @@ All data remains on-device. No data is transmitted to external servers unless th
 - SMS cancel window: suppression works within window, send proceeds after expiry
 
 ### Integration Tests (Android — AndroidX Test + Hilt Testing + Robolectric)
+
 - sqlite-vec: vector round-trips, ANN search returns correct ranking for known embeddings
 - Room DB: migrations, DAO queries, Flow emissions
 - `AiCoreService` binding: feature modules bind/unbind cleanly, service survives config changes
 - Content provider access: contacts and SMS read correctly on instrumented device
 
 ### E2E Tests (Device — UI Automator + Espresso)
+
 - Onboarding: default SMS + dialer role assignment completes
 - SMS auto-reply: reply sends after delay, cancel notification suppresses it within window
 - Voice: wake word fires, voice input captured, TTS response plays
@@ -191,7 +201,7 @@ All data remains on-device. No data is transmitted to external servers unless th
 ## 9. Error Handling
 
 | Failure scenario | Behavior |
-|---|---|
+| --- | --- |
 | LLM inference fails / times out | Fall back to a canned template reply ("I'll get back to you shortly"). Log error. |
 | STT timeout / prolonged silence during call | Prompt caller to repeat after 5s. After 2 consecutive failures, hand call to user. |
 | `AiCoreService` killed by OS | `START_STICKY` auto-restart. Feature modules detect service disconnect and display degraded state indicator. |
