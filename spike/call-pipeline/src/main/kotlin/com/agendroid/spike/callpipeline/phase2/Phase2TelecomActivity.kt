@@ -14,6 +14,7 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
+import com.agendroid.spike.callpipeline.measurement.BatteryMonitor
 import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.*
 
@@ -44,10 +45,26 @@ private fun Phase2Screen(
 ) {
     var takeoverMs by remember { mutableStateOf<Long?>( null) }
     var log by remember { mutableStateOf("") }
+    var batteryLevel by remember { mutableStateOf(-1) }
+
+    LaunchedEffect(Unit) {
+        val monitor = BatteryMonitor(context)
+        while (true) {
+            batteryLevel = monitor.currentLevel()
+            delay(10_000L)
+        }
+    }
 
     Column(Modifier.fillMaxSize().padding(24.dp)) {
         Text("Phase 2: Telecom Audio Routing", style = MaterialTheme.typography.titleLarge)
         Spacer(Modifier.height(16.dp))
+        if (batteryLevel >= 0) {
+            Text(
+                "Current battery: $batteryLevel%  (record before + after 10-min call — gate: ≤8% drain)",
+                style = MaterialTheme.typography.bodyMedium,
+            )
+            Spacer(Modifier.height(8.dp))
+        }
         Text(
             buildString {
                 appendLine("Instructions:")
@@ -55,19 +72,22 @@ private fun Phase2Screen(
                 appendLine("1. Set this app as the default phone app:")
                 appendLine("   Settings → Apps → Default apps → Phone app → Agendroid Spike")
                 appendLine()
-                appendLine("2. Have a second phone call this device's number.")
+                appendLine("2. Before making the test call, note the battery % shown above.")
+                appendLine("   After a 10-minute call, check the % again. Gate: ≤8% drain.")
                 appendLine()
-                appendLine("3. The SpikeInCallService will answer automatically and start")
+                appendLine("3. Have a second phone call this device's number.")
+                appendLine()
+                appendLine("4. The SpikeInCallService will answer automatically and start")
                 appendLine("   capturing + echoing audio. You should hear your own voice")
                 appendLine("   echoed back — this confirms duplex audio routing works.")
                 appendLine()
-                appendLine("4. Watch adb logcat for:")
+                appendLine("5. Watch adb logcat for:")
                 appendLine("   • 'SpikeCallScreening: Call intercepted' — confirms CallScreeningService works")
                 appendLine("   • 'SpikeInCallService: First audio frame captured' — confirms AudioRecord works")
                 appendLine("   NOTE: The 'Measure Takeover' button below is a lower-bound estimate.")
                 appendLine("   For the authoritative ≤200ms gate, read the logcat output from a live call.")
                 appendLine()
-                appendLine("5. Tap 'Measure Takeover' to benchmark the AI→user handoff time.")
+                appendLine("6. Tap 'Measure Takeover' to benchmark the AI→user handoff time.")
             },
             style = MaterialTheme.typography.bodyMedium,
         )

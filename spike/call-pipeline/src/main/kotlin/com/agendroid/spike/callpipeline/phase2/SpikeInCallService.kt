@@ -130,8 +130,8 @@ class SpikeInCallService : InCallService() {
 
     override fun onDestroy() {
         super.onDestroy()
-        scope.cancel()
-        stopAudio()
+        stopAudio()      // launch teardown coroutine BEFORE cancelling scope
+        scope.cancel()   // now cancel the scope
     }
 
     companion object { const val TAG = "SpikeInCallService" }
