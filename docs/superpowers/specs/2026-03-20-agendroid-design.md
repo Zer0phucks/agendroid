@@ -221,3 +221,118 @@ All data remains on-device. No data is transmitted to external servers unless th
 - **Background:** WorkManager (RAG ingestion), Foreground Service (AI core)
 - **Min SDK:** 31 (Android 12) — required for Telecom API improvements and `CallScreeningService`
 - **Target SDK:** 35 (Android 15)
+
+---
+
+## 11. Engineering Readiness Addendum
+
+*Added in response to pre-implementation technical review. Addresses execution risks before coding begins.*
+
+### 11.1 Call Pipeline Latency SLOs
+
+The full-agent call loop (end of caller speech → start of AI spoken response) must complete within **2 seconds** to feel conversational. Hard budgets per stage:
+
+| Pipeline stage | Budget | Notes |
+| --- | --- | --- |
+| VAD (end-of-speech detection) | ≤ 100ms | WebRTC VAD or Energy VAD |
+| STT (Whisper Small) | ≤ 500ms | Runs on CPU; GPU delegate experimental |
+| RAG retrieval (sqlite-vec) | ≤ 50ms | ANN search is fast; acceptable |
+| LLM first token (Gemma 4B, Adreno GPU) | ≤ 500ms | Prefill of short prompt |
+| LLM full response (≤ 25 tokens) | ≤ 600ms | At 40 tok/s |
+| TTS synthesis (Kokoro) | ≤ 200ms | Short utterances |
+| **Total end-to-end** | **≤ 1.95s** | |
+
+If the combined budget is exceeded (e.g., under thermal throttling), the fallback is: play a bridging phrase via TTS ("One moment…") while generation continues. A **2-week feasibility spike** on the call pipeline is required before the main implementation begins — success criterion is sustained sub-2s latency across 20 consecutive turns at room temperature on a OnePlus 12.
+
+### 11.2 Resource Budgets & Thermal Fallback
+
+**Memory budget:**
+
+| Component | Estimated RAM |
+| --- | --- |
+| Gemma 3 4B (4-bit quantized) | ~2.5 GB |
+| Whisper Small | ~150 MB |
+| Kokoro TTS | ~350 MB |
+| all-MiniLM-L6-v2 | ~22 MB |
+| App + framework overhead | ~300 MB |
+| **Total** | **~3.3 GB** |
+
+This is well within the OnePlus 12's 12–16 GB RAM. However, OEM memory pressure management may still reclaim the foreground service — see §11.4.
+
+**Thermal fallback matrix:**
+
+| Device state | LLM model | Voice features | Auto-reply |
+| --- | --- | --- | --- |
+| Normal | Gemma 3 4B | Full | Enabled |
+| Warm (>38°C SoC) | Gemma 3 1B | Full | Enabled |
+| Hot (>42°C SoC) | Gemma 3 1B | STT only (no wake word) | Semi-auto only |
+| Battery < 15% | Gemma 3 1B | Disabled | Semi-auto only |
+| Battery < 10% | Off | Disabled | Disabled (notify only) |
+
+SoC temperature is read from the Android thermal API (`ThermalManager`). `AiCoreService` monitors temperature and battery via broadcast receivers and switches model/feature sets accordingly, emitting a `Flow<ResourceState>` that feature modules observe to update their UI.
+
+### 11.3 Security & Privacy Model
+
+**At-rest encryption:**
+
+- Room DB encrypted with SQLCipher; key stored in Android Keystore
+- Documents in app-private storage encrypted with AES-256-GCM via Jetpack Security
+- sqlite-vec database encrypted via SQLCipher
+
+**Integration auth:**
+
+- OAuth2 tokens (for CalDAV, IMAP) stored in Android Keystore-backed `EncryptedSharedPreferences`
+- No credentials stored in plaintext anywhere
+
+**Prompt injection defense:**
+
+- User-controlled content (SMS body, document text, contact names) inserted into LLM prompts inside clearly delimited sections (e.g., `[USER DATA START] … [USER DATA END]`)
+- System prompt is hardcoded and not modifiable by any ingested data
+- RAG chunks are sanitized to strip control characters before insertion
+
+**Data retention:**
+
+- Vectors are re-indexed from source data; deleting a source (e.g., a document) re-queues re-indexing with that source excluded
+- No telemetry or crash data sent to external servers; opt-in only via a future setting
+
+### 11.4 Background Service Reliability
+
+Android 14/15 and OEM battery optimizers (especially OnePlus OxygenOS) aggressively kill long-running foreground services. Mitigations:
+
+- Request battery optimization exemption (`ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS`) during onboarding; explain why (persistent AI assistant requires it)
+- `AiCoreService` uses correct foreground service types: `FOREGROUND_SERVICE_TYPE_MICROPHONE` (when wake word is active) + `FOREGROUND_SERVICE_TYPE_PHONE_CALL` (during calls)
+- Feature modules implement a **health watchdog**: ping `AiCoreService` every 30 seconds via the bound service interface; if no response within 5 seconds, rebind and show a degraded state indicator
+- `RECEIVE_BOOT_COMPLETED` restarts `AiCoreService` after reboot
+- Persistent notification is non-dismissible (required by Android for foreground services with microphone)
+
+### 11.5 Compliance & Consent UX
+
+**Call disclosure (required):**
+
+- Every AI-answered call must open with a disclosure: *"Hi, this is an AI assistant for [Name]. This call may be transcribed. Say 'talk to [Name]' at any time to reach them directly."*
+- Disclosure is not skippable and not configurable off
+- If the caller says any variant of "talk to a real person", "transfer me", "stop", or "human", the AI immediately hands the call to the user (keyword detection via simple string match on STT output, not LLM)
+
+**Recording consent:**
+
+- In two-party consent jurisdictions (e.g., California, Germany), the disclosure above satisfies the notification requirement
+- The app does not determine jurisdiction automatically; it applies the disclosure universally to be safe
+- Call transcripts are stored locally only; not uploaded
+
+**SMS disclosure:**
+
+- Auto-replied messages include a configurable footer (default: *"[Sent by AI assistant]"*); the user can customize or remove it, but removing it shows a one-time warning about impersonation risk
+
+**Data access transparency:**
+
+- A "What the AI knows about you" screen in `:feature:assistant` shows all indexed data sources, vector count per source, and allows deletion of individual sources
+
+### 11.6 Permission Corrections
+
+The original spec listed `CALL_PHONE` as a telephony permission. For Telecom-API-based call management (our architecture), the correct permission is `MANAGE_OWN_CALLS`, not `CALL_PHONE`. Corrected permission list:
+
+- Remove: `CALL_PHONE` (for direct PSTN dialing, not needed with Telecom API)
+- Retain: `MANAGE_OWN_CALLS` (registers `TelecomConnectionService` for outgoing call management)
+- Note: `WRITE_CALL_LOG` requires the app to be the default dialer; this is already enforced by onboarding
+
+Play Store policy note: the app uses `READ_SMS`, `RECEIVE_SMS`, `SEND_SMS`, and `WRITE_SMS` — these require the app to be the default SMS handler (already required by onboarding) and will trigger Play Store review under the SMS permissions policy. The app must clearly state its default-SMS-app use case in the store listing.
