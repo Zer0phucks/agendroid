@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuite name="com.agendroid.core.common.ResultTest" tests="5" skipped="0" failures="0" errors="0" timestamp="2026-03-20T20:47:48" hostname="noobsupreme" time="0.011">
+  <properties/>
+  <testcase name="getOrDefault returns data on Success, default on Failure()" classname="com.agendroid.core.common.ResultTest" time="0.007"/>
+  <testcase name="getOrNull returns data on Success, null on Failure()" classname="com.agendroid.core.common.ResultTest" time="0.0"/>
+  <testcase name="Failure holds exception and isFailure is true()" classname="com.agendroid.core.common.ResultTest" time="0.001"/>
+  <testcase name="map transforms Success value, passes through Failure()" classname="com.agendroid.core.common.ResultTest" time="0.001"/>
+  <testcase name="Success holds value and isSuccess is true()" classname="com.agendroid.core.common.ResultTest" time="0.0"/>
+  <system-out><![CDATA[]]></system-out>
+  <system-err><![CDATA[]]></system-err>
+</testsuite>
