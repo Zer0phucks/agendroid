@@ -61,7 +61,7 @@ class Phase3PipelineActivity : ComponentActivity() {
             ttsReady.value = status == TextToSpeech.SUCCESS
             tts?.language = Locale.US
         }
-        val modelPath = "${getExternalFilesDir(null)?.absolutePath}/$MODEL_FILENAME"
+        val modelPath = "${filesDir.absolutePath}/$MODEL_FILENAME"
         setContent {
             MaterialTheme {
                 Phase3Screen(scope, applicationContext, modelPath, tts, ttsReady)
