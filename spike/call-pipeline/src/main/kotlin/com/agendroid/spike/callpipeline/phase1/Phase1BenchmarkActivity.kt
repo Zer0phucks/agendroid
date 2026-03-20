@@ -52,7 +52,7 @@ class Phase1BenchmarkActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        val modelPath = "${getExternalFilesDir(null)?.absolutePath}/$MODEL_FILENAME"
+        val modelPath = "${filesDir.absolutePath}/$MODEL_FILENAME"
         setContent {
             MaterialTheme {
                 Phase1Screen(scope, modelPath, applicationContext)
