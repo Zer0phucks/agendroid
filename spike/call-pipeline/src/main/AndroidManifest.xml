@@ -21,7 +21,7 @@
         android:name=".SpikeApp"
         android:allowBackup="false"
         android:label="Agendroid Spike"
-        android:theme="@android:theme/Theme.Material.Light.NoActionBar">
+        android:theme="@android:style/Theme.Material.Light.NoActionBar">
 
         <activity
             android:name=".SpikeLauncherActivity"
