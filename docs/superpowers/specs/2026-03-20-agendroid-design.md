@@ -242,7 +242,17 @@ The full-agent call loop (end of caller speech → start of AI spoken response) 
 | TTS synthesis (Kokoro) | ≤ 200ms | Short utterances |
 | **Total end-to-end** | **≤ 1.95s** | |
 
-If the combined budget is exceeded (e.g., under thermal throttling), the fallback is: play a bridging phrase via TTS ("One moment…") while generation continues. A **2-week feasibility spike** on the call pipeline is required before the main implementation begins — success criterion is sustained sub-2s latency across 20 consecutive turns at room temperature on a OnePlus 12.
+If the combined budget is exceeded (e.g., under thermal throttling), the fallback is: play a bridging phrase via TTS ("One moment…") while generation continues. A **2-week feasibility spike** on the call pipeline is required before the main implementation begins. The spike must validate call-path assumptions on a real OnePlus 12, specifically: telecom audio routing under full-duplex STT/TTS, behaviour under interrupt (user taps "Take Over" mid-generation), and the impact of concurrent foreground audio sessions. Spike acceptance gates (hard go/no-go):
+
+| Gate | Threshold | Condition |
+| --- | --- | --- |
+| End-to-end latency (p95) | ≤ 2 000ms | Measured across 20 consecutive turns at room temp |
+| Thermal sustain | ≤ 42°C SoC | After 10 minutes of continuous call-agent operation |
+| Crash-free rate | 100% | Zero crashes across the 20-turn test suite |
+| Battery drain | ≤ 8% / 10 min | During active call-agent session, screen on |
+| Take-over handoff | ≤ 200ms | Time from tap to user having live mic |
+
+If any gate fails, **v1 scope is downgraded**: full call-agent deferred; v1 ships with screen-only call screening (AI listens and shows transcript, user speaks) and autonomous SMS only.
 
 ### 11.2 Resource Budgets & Thermal Fallback
 
@@ -315,8 +325,8 @@ Android 14/15 and OEM battery optimizers (especially OnePlus OxygenOS) aggressiv
 
 **Recording consent:**
 
-- In two-party consent jurisdictions (e.g., California, Germany), the disclosure above satisfies the notification requirement
-- The app does not determine jurisdiction automatically; it applies the disclosure universally to be safe
+- The disclosure above is designed to support consent requirements in two-party consent jurisdictions (e.g., California, Germany); it does not constitute legal advice and requires jurisdiction-specific legal review before public distribution
+- The app does not determine jurisdiction automatically; it applies the disclosure universally as a conservative default
 - Call transcripts are stored locally only; not uploaded
 
 **SMS disclosure:**
@@ -326,6 +336,30 @@ Android 14/15 and OEM battery optimizers (especially OnePlus OxygenOS) aggressiv
 **Data access transparency:**
 
 - A "What the AI knows about you" screen in `:feature:assistant` shows all indexed data sources, vector count per source, and allows deletion of individual sources
+
+### 11.7 Abuse & Failure Safeguards
+
+**Caller loop protection:**
+
+- Maximum 10 AI turns per call session; after the 10th turn the AI says *"Let me connect you directly"* and hands off to the user unconditionally
+- If the caller repeats the same phrase 3 times without the LLM producing a different response, trigger handoff immediately (loop-break detection via string similarity on STT output)
+- If STT produces empty output for 3 consecutive turns, hand off to user
+
+**SMS rate limiting:**
+
+- Maximum 5 auto-sent AI replies per contact per hour; additional incoming messages from that contact queue as manual pending in Semi mode for that hour
+- Maximum 30 AI-generated SMS sent per day globally (configurable); threshold triggers a notification prompting the user to review
+
+**Emergency call handling:**
+
+- `CallScreeningService` must not intercept calls to emergency numbers (112, 999, 911, etc.) under any circumstances; these pass through immediately to the system dialer
+- If `AiCoreService` is in a crashed or degraded state, `CallScreeningService` defaults to pass-through for all calls — it never blocks a call because the AI is unavailable
+- The call autonomy setting has no effect on emergency numbers
+
+**Outgoing call safety:**
+
+- The AI cannot initiate outgoing calls autonomously; outgoing calls always require an explicit user action (tap to confirm)
+- The AI can *suggest* calling a contact ("Want me to call John?") but cannot execute without user confirmation
 
 ### 11.6 Permission Corrections
 
