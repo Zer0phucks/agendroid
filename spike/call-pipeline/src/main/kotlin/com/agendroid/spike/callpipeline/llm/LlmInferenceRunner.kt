@@ -24,9 +24,9 @@ import java.util.concurrent.atomic.AtomicReference
  *     [OutputHandler.ProgressListener.run].
  *
  * Manual step — push model to device before running on hardware:
- *   adb push gemma3-1b-it-gpu-int4.task /sdcard/Download/agendroid-spike/
- * Model path on device: /sdcard/Download/agendroid-spike/gemma3-1b-it-gpu-int4.task
- * GPU variant preferred; fall back to gemma3-1b-it-cpu-int4.task if the GPU delegate fails.
+ *   adb push gemma3-1b-it-int4.task /sdcard/Download/agendroid-spike/
+ * Model path on device: /sdcard/Download/agendroid-spike/gemma3-1b-it-int4.task
+ * Source: litert-community/Gemma3-1B-IT on HuggingFace (gemma3-1b-it-int4.task)
  */
 class LlmInferenceRunner(
     private val context: Context,

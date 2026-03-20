@@ -43,7 +43,7 @@ val BENCHMARK_PROMPTS = listOf(
     "You are a phone assistant. The caller said: 'Goodbye.'. Reply in one sentence.",
 )
 
-private const val MODEL_PATH = "/sdcard/Download/agendroid-spike/gemma3-1b-it-gpu-int4.task"
+private const val MODEL_PATH = "/sdcard/Download/agendroid-spike/gemma3-1b-it-int4.task"
 
 @AndroidEntryPoint
 class Phase1BenchmarkActivity : ComponentActivity() {
