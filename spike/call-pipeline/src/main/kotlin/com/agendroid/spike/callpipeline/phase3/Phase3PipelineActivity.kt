@@ -144,20 +144,32 @@ private suspend fun runPhase3(
             log("  LLM first_token=${llmResult.firstTokenMs}ms  total=${llmResult.totalMs}ms")
             log("  Response: \"${llmResult.text.take(80)}\"")
 
-            // Stage 3: TTS — measure time to speak the response
+            // Stage 3: TTS — measure actual time to speak the response
             val ttsStart = System.currentTimeMillis()
-            tts?.speak(llmResult.text, TextToSpeech.QUEUE_FLUSH, null, "turn_$i")
-            // TTS speak() is async. Approximate duration: ~200ms for short sentences.
-            // For accurate measurement, use an utterance completion listener.
-            delay(200L)
+            if (tts != null) {
+                suspendCancellableCoroutine<Unit> { cont ->
+                    tts.setOnUtteranceProgressListener(object : android.speech.tts.UtteranceProgressListener() {
+                        override fun onStart(utteranceId: String?) {}
+                        override fun onDone(utteranceId: String?) {
+                            if (utteranceId == "turn_$i") cont.resume(Unit)
+                        }
+                        override fun onError(utteranceId: String?) {
+                            if (utteranceId == "turn_$i") cont.resume(Unit) // treat error as done
+                        }
+                    })
+                    tts.speak(llmResult.text, TextToSpeech.QUEUE_FLUSH, null, "turn_$i")
+                }
+            } else {
+                delay(200L)  // fallback if TTS not available
+            }
             val ttsMs = System.currentTimeMillis() - ttsStart
-            log("  TTS (approx): ${ttsMs}ms")
+            log("  TTS (actual completion): ${ttsMs}ms")
 
             val totalMs = sttMs + llmResult.totalMs + ttsMs
             val turn = recorder.startTurn()
             turn.markStage("stt_placeholder", sttMs)
             turn.markStage("llm_full", llmResult.totalMs)
-            turn.markStage("tts_delay_placeholder", ttsMs)
+            turn.markStage("tts", ttsMs)
             turn.end()
             log("  Total: ${totalMs}ms  (stt placeholder + llm + tts)\n")
         }
