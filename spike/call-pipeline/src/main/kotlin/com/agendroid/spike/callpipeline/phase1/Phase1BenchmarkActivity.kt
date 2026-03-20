@@ -43,7 +43,7 @@ val BENCHMARK_PROMPTS = listOf(
     "You are a phone assistant. The caller said: 'Goodbye.'. Reply in one sentence.",
 )
 
-private const val MODEL_PATH = "/sdcard/Download/agendroid-spike/gemma3-1b-it-int4.task"
+private const val MODEL_FILENAME = "gemma3-1b-it-int4.task"
 
 @AndroidEntryPoint
 class Phase1BenchmarkActivity : ComponentActivity() {
@@ -52,9 +52,10 @@ class Phase1BenchmarkActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        val modelPath = "${getExternalFilesDir(null)?.absolutePath}/$MODEL_FILENAME"
         setContent {
             MaterialTheme {
-                Phase1Screen(scope, MODEL_PATH, applicationContext)
+                Phase1Screen(scope, modelPath, applicationContext)
             }
         }
     }
