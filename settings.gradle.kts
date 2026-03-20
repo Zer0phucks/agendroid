@@ -8,9 +8,8 @@ pluginManagement {
 dependencyResolutionManagement {
     repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
     repositories {
-        google()
+        google() // includes com.google.ai.edge.litert (LiteRT)
         mavenCentral()
-        maven("https://storage.googleapis.com/download.tensorflow.org/maven") // LiteRT
     }
 }
 
