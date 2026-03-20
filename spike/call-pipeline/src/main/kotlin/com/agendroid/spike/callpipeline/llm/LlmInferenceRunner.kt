@@ -8,6 +8,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicLong
 import java.util.concurrent.atomic.AtomicReference
 
@@ -41,6 +42,13 @@ class LlmInferenceRunner(
     private val callStartMs = AtomicLong(0L)
     private val callBuffer = AtomicReference<StringBuilder?>()
 
+    // Fix 1: tainted-buffer guard — set to true when runTurn() times out so the
+    // still-running listener does not corrupt the next call's state.
+    private val callTimedOut = AtomicReference<AtomicBoolean?>(null)
+
+    // Fix 3: per-call first-token-seen flag, eliminating the -2L intermediate state.
+    private val callFirstTokenSeen = AtomicReference<AtomicBoolean?>(null)
+
     data class InferenceResult(
         val text: String,
         val firstTokenMs: Long,   // time from prompt submission to first token received
@@ -57,10 +65,18 @@ class LlmInferenceRunner(
      */
     suspend fun load(): Unit = withContext(Dispatchers.IO) {
         val listener = OutputHandler.ProgressListener<String> { partialResult, done ->
+            // Fix 1: if the previous call timed out, discard all tokens from its
+            // still-running MediaPipe thread so they cannot corrupt the next call.
+            if (callTimedOut.get()?.get() == true) return@ProgressListener
+
             val startMs = callStartMs.get()
-            if (partialResult.isNotEmpty() && callFirstTokenMs.compareAndSet(-1L, -2L)) {
+
+            // Fix 3: use the per-call AtomicBoolean instead of the -2L CAS pattern.
+            val seen = callFirstTokenSeen.get()
+            if (partialResult.isNotEmpty() && seen != null && !seen.getAndSet(true)) {
                 callFirstTokenMs.set(System.currentTimeMillis() - startMs)
             }
+
             callBuffer.get()?.append(partialResult)
             if (done) {
                 callLatch.get()?.countDown()
@@ -85,13 +101,27 @@ class LlmInferenceRunner(
         val latch = CountDownLatch(1)
         val sb = StringBuilder()
         callBuffer.set(sb)
+
+        // Fix 3: install a fresh first-token-seen flag and reset the timestamp.
+        val firstTokenSeen = AtomicBoolean(false)
+        callFirstTokenSeen.set(firstTokenSeen)
         callFirstTokenMs.set(-1L)
-        callLatch.set(latch)
+
+        // Fix 1: install a fresh timed-out flag for this call.
+        val timedOut = AtomicBoolean(false)
+        callTimedOut.set(timedOut)
+
+        // Fix 2: callStartMs must be set before callLatch so the listener never
+        // reads a stale start time if it fires between the two assignments.
         val startMs = System.currentTimeMillis()
-        callStartMs.set(startMs)
+        callStartMs.set(startMs)    // must be before callLatch.set
+        callLatch.set(latch)
 
         llm!!.generateResponseAsync(prompt)
-        latch.await(30, TimeUnit.SECONDS)
+
+        // Fix 1: capture the return value so we can mark the call as timed out.
+        val completed = latch.await(30, TimeUnit.SECONDS)
+        if (!completed) timedOut.set(true)
 
         val totalMs = System.currentTimeMillis() - startMs
         val firstTokenMs = callFirstTokenMs.get().let { if (it >= 0) it else totalMs }
