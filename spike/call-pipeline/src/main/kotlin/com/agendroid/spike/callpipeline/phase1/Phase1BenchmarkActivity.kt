@@ -120,11 +120,9 @@ private suspend fun runPhase1(
     val thermalReadings = java.util.Collections.synchronizedList(mutableListOf<Float>())
 
     // Start thermal monitoring in background
-    val thermalJob = CoroutineScope(Dispatchers.Default).launch {
-        thermal.temperatureFlow(2_000L).onEach { temp ->
-            thermalReadings.add(temp)
-        }.launchIn(this)
-    }
+    val thermalJob = thermal.temperatureFlow(2_000L)
+        .onEach { thermalReadings.add(it) }
+        .launchIn(CoroutineScope(Dispatchers.Default))
 
     val runner = LlmInferenceRunner(context, modelPath, maxTokens = 50)
     try {
@@ -137,14 +135,13 @@ private suspend fun runPhase1(
             log("Turn ${i + 1}/20: ${prompt.take(60)}…")
             val result = runner.runTurn(prompt)
             val turn = recorder.startTurn()
-            turn.markStage("llm_first_token", result.firstTokenMs)
             turn.markStage("llm_full", result.totalMs)
             turn.end()
             log("  → first_token=${result.firstTokenMs}ms  total=${result.totalMs}ms")
             log("  → \"${result.text.take(80)}\"")
         }
     } finally {
-        thermalJob.cancel()
+        thermalJob.cancelAndJoin()
         runner.close()
     }
 
