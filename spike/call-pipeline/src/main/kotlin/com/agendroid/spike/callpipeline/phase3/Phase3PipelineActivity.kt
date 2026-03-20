@@ -22,7 +22,7 @@ import java.util.Locale
 import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
 
-private const val MODEL_PATH = "/sdcard/Download/agendroid-spike/gemma3-1b-it-gpu-int4.task"
+private const val MODEL_PATH = "/sdcard/Download/agendroid-spike/gemma3-1b-it-int4.task"
 
 // 20 canned caller utterances — simulates what a caller would say each turn
 private val CALLER_UTTERANCES = listOf(
