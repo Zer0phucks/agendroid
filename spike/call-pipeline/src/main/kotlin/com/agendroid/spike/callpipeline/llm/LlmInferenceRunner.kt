@@ -97,6 +97,10 @@ class LlmInferenceRunner(
     suspend fun runTurn(prompt: String): InferenceResult = withContext(Dispatchers.IO) {
         checkNotNull(llm) { "Call load() before runTurn()" }
 
+        // Poison any still-running listener from the previous (possibly timed-out) call
+        // BEFORE touching any other shared state, so it bails out immediately.
+        callTimedOut.get()?.set(true)
+
         // Reset per-call state before triggering generation.
         val latch = CountDownLatch(1)
         val sb = StringBuilder()
