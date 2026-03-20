@@ -1,0 +1,93 @@
+[versions]
+agp                 = "8.7.0"
+kotlin              = "2.1.0"
+ksp                 = "2.1.0-1.0.29"
+hilt                = "2.52"
+compose-bom         = "2024.12.01"
+room                = "2.7.0"
+workmanager         = "2.10.0"
+coroutines          = "1.9.0"
+core-ktx            = "1.15.0"
+activity-compose    = "1.9.3"
+navigation-compose  = "2.8.4"
+lifecycle           = "2.8.7"
+sqlcipher           = "4.5.6"
+sqlite-vec          = "0.1.6"
+litert              = "1.0.1"
+mockk               = "1.13.13"
+junit5              = "5.11.3"
+junit5-android      = "1.6.0"
+
+[libraries]
+# Kotlin + Coroutines
+kotlin-stdlib                 = { module = "org.jetbrains.kotlin:kotlin-stdlib", version.ref = "kotlin" }
+coroutines-core               = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-core", version.ref = "coroutines" }
+coroutines-android            = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-android", version.ref = "coroutines" }
+coroutines-test               = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-test", version.ref = "coroutines" }
+
+# AndroidX Core
+core-ktx                      = { module = "androidx.core:core-ktx", version.ref = "core-ktx" }
+activity-compose              = { module = "androidx.activity:activity-compose", version.ref = "activity-compose" }
+lifecycle-runtime-ktx         = { module = "androidx.lifecycle:lifecycle-runtime-ktx", version.ref = "lifecycle" }
+lifecycle-viewmodel-compose   = { module = "androidx.lifecycle:lifecycle-viewmodel-compose", version.ref = "lifecycle" }
+
+# Compose
+compose-bom                   = { module = "androidx.compose:compose-bom", version.ref = "compose-bom" }
+compose-ui                    = { module = "androidx.compose.ui:ui" }
+compose-ui-tooling-preview    = { module = "androidx.compose.ui:ui-tooling-preview" }
+compose-ui-tooling            = { module = "androidx.compose.ui:ui-tooling" }
+compose-material3             = { module = "androidx.compose.material3:material3" }
+compose-foundation            = { module = "androidx.compose.foundation:foundation" }
+navigation-compose            = { module = "androidx.navigation:navigation-compose", version.ref = "navigation-compose" }
+
+# Hilt
+hilt-android                  = { module = "com.google.dagger:hilt-android", version.ref = "hilt" }
+hilt-compiler                 = { module = "com.google.dagger:hilt-compiler", version.ref = "hilt" }
+hilt-navigation-compose       = { module = "androidx.hilt:hilt-navigation-compose", version = "1.2.0" }
+
+# Room
+room-runtime                  = { module = "androidx.room:room-runtime", version.ref = "room" }
+room-ktx                      = { module = "androidx.room:room-ktx", version.ref = "room" }
+room-compiler                 = { module = "androidx.room:room-compiler", version.ref = "room" }
+room-testing                  = { module = "androidx.room:room-testing", version.ref = "room" }
+
+# WorkManager
+workmanager-ktx               = { module = "androidx.work:work-runtime-ktx", version.ref = "workmanager" }
+hilt-work                     = { module = "androidx.hilt:hilt-work", version = "1.2.0" }
+hilt-work-compiler            = { module = "androidx.hilt:hilt-compiler", version = "1.2.0" }
+
+# SQLCipher + sqlite-vec
+sqlcipher-android             = { module = "net.zetetic:sqlcipher-android", version.ref = "sqlcipher" }
+sqlite-ktx                    = { module = "androidx.sqlite:sqlite-ktx", version = "2.5.0" }
+# sqlite-vec ships as a prebuilt AAR — version entry for tracking only; actual dep added in Plan 3
+sqlite-vec-version            = { module = "io.github.asg017:sqlite-vec-android-bundled", version.ref = "sqlite-vec" }
+
+# LiteRT (on-device ML)
+litert                        = { module = "com.google.ai.edge.litert:litert", version.ref = "litert" }
+litert-gpu                    = { module = "com.google.ai.edge.litert:litert-gpu", version.ref = "litert" }
+litert-support                = { module = "com.google.ai.edge.litert:litert-support-api", version.ref = "litert" }
+
+# Testing
+junit5-api                    = { module = "org.junit.jupiter:junit-jupiter-api", version.ref = "junit5" }
+junit5-engine                 = { module = "org.junit.jupiter:junit-jupiter-engine", version.ref = "junit5" }
+junit5-params                 = { module = "org.junit.jupiter:junit-jupiter-params", version.ref = "junit5" }
+mockk                         = { module = "io.mockk:mockk", version.ref = "mockk" }
+androidx-test-core            = { module = "androidx.test:core-ktx", version = "1.6.1" }
+androidx-test-runner          = { module = "androidx.test:runner", version = "1.6.2" }
+hilt-android-testing          = { module = "com.google.dagger:hilt-android-testing", version.ref = "hilt" }
+
+[plugins]
+android-application   = { id = "com.android.application", version.ref = "agp" }
+android-library       = { id = "com.android.library", version.ref = "agp" }
+kotlin-android        = { id = "org.jetbrains.kotlin.android", version.ref = "kotlin" }
+kotlin-jvm            = { id = "org.jetbrains.kotlin.jvm", version.ref = "kotlin" }
+ksp                   = { id = "com.google.devtools.ksp", version.ref = "ksp" }
+hilt                  = { id = "com.google.dagger.hilt.android", version.ref = "hilt" }
+compose-compiler      = { id = "org.jetbrains.kotlin.plugin.compose", version.ref = "kotlin" }
+
+[bundles]
+compose               = ["compose-ui", "compose-ui-tooling-preview", "compose-material3", "compose-foundation"]
+coroutines            = ["coroutines-core", "coroutines-android"]
+room                  = ["room-runtime", "room-ktx"]
+litert                = ["litert", "litert-gpu", "litert-support"]
+junit5                = ["junit5-api", "junit5-params"]

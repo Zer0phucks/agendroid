@@ -1,1 +1,21 @@
+# Android
+*.iml
+.gradle/
+/local.properties
+/.idea/
+.DS_Store
+/build/
+/captures/
+.externalNativeBuild/
+.cxx/
+*.apk
+*.aab
+
+# Models (large binary assets — tracked separately via Git LFS or downloaded at build time)
+**/*.tflite
+**/*.bin
+**/*.gguf
+**/*.ort
+
+# Superpowers brainstorm session files
 .superpowers/
