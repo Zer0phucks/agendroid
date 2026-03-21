@@ -2,6 +2,7 @@ package com.agendroid.core.data.entity
 
 import androidx.room.ColumnInfo
 import androidx.room.Entity
+import androidx.room.ForeignKey
 import androidx.room.Index
 import androidx.room.PrimaryKey
 
@@ -11,7 +12,19 @@ import androidx.room.PrimaryKey
  */
 @Entity(
     tableName = "chunks",
-    indices = [Index("document_id"), Index("contact_filter")],
+    foreignKeys = [
+        ForeignKey(
+            entity = KnowledgeDocumentEntity::class,
+            parentColumns = ["id"],
+            childColumns = ["document_id"],
+            onDelete = ForeignKey.CASCADE,
+        ),
+    ],
+    indices = [
+        Index("document_id"),
+        Index("contact_filter"),
+        Index(value = ["document_id", "chunk_index"], unique = true),
+    ],
 )
 data class ChunkEntity(
     @PrimaryKey(autoGenerate = true) val id: Long = 0,
