@@ -43,8 +43,9 @@ dependencies {
     // SQLCipher key storage
     implementation(libs.security.crypto)
 
-    // sqlite-vec vector store
-    implementation(libs.sqlite.vec.android)
+    // sqlite-vec vector store — loadable .so approach; Maven AAR does not exist yet.
+    // Task 7 will integrate the raw .so files from GitHub releases.
+    // implementation(libs.sqlite.vec.android)  // TODO(Task 7): uncomment once AAR is available
 
     // WorkManager (RAG ingestion workers live here)
     implementation(libs.workmanager.ktx)
@@ -64,6 +65,7 @@ dependencies {
     androidTestImplementation(libs.androidx.test.ext.junit)
     androidTestImplementation(libs.androidx.test.rules)
     androidTestImplementation(libs.bundles.coroutines)
+    androidTestImplementation(libs.coroutines.test)
 }
 
 tasks.withType<Test> { useJUnitPlatform() }
