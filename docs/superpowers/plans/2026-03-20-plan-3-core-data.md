@@ -2,9 +2,9 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Implement `:core:common` extensions and `:core:data` — the encrypted Room database, sqlite-vec vector store, and content-provider repositories that every other module depends on.
+**Goal:** Implement `:core:common` extensions and `:core:data` — the encrypted Room database, sqlite-vec vector store, an index-consistency coordinator, and content-provider repositories that every other module depends on.
 
-**Architecture:** Room + SQLCipher provides an AES-256 encrypted database for structured data (chunks, documents, summaries, notes, preferences). A separate SQLite file loaded with the sqlite-vec extension stores float embeddings by chunk ID only; the sensitive chunk text stays in Room. Content-provider repositories wrap Android's system SMS, contacts, and call-log providers behind interfaces so feature modules never touch `ContentResolver` directly.
+**Architecture:** Room + SQLCipher provides an AES-256 encrypted database for structured data (chunks, documents, summaries, notes, preferences). A separate SQLite file loaded with the sqlite-vec extension stores float embeddings by chunk ID only; the sensitive chunk text stays in Room. A `KnowledgeIndexRepository` is the only component allowed to mutate both stores; it coordinates document re-index/delete flows, compensates on failure, and prunes orphan vectors so Room remains the source of truth. Content-provider repositories wrap Android's system SMS, contacts, and call-log providers behind interfaces so feature modules never touch `ContentResolver` directly.
 
 **Tech Stack:** Room 2.7, SQLCipher 4.5.6 (`net.zetetic:sqlcipher-android`), sqlite-vec 0.1.6 (`io.github.asg017:sqlite-vec-android-bundled`), Jetpack Security Crypto 1.0.0, Hilt, Kotlin Coroutines/Flow, JUnit 5 (JVM), AndroidJUnit4 (instrumented).
 
@@ -25,6 +25,14 @@ The dependency chain for Plans 4–8:
 
 Get this module right — every other module depends on it.
 
+### V1 scope boundaries
+
+This plan delivers a **shipping-quality encrypted data layer** and an **SMS-first** messaging repository. It does **not** complete every requirement for a production-ready default messaging app on its own.
+
+- Task 9 covers SMS threads/messages and subscription-aware sending for dual-SIM devices.
+- MMS, MMS group threads, attachment persistence, and `WAP_PUSH_DELIVER_ACTION` handling are explicitly **out of scope for Plan 3** and must be implemented before any public/default-SMS release.
+- The repository APIs in this plan therefore model **SMS-only** messaging data. Follow-up plans may replace them with a richer messaging abstraction once MMS is scheduled.
+
 ### Two-database design
 
 | Database | File | Purpose | Encryption |
@@ -33,6 +41,12 @@ Get this module right — every other module depends on it.
 | VectorStore | `vectors.db` | Float embeddings keyed by chunk_id | AOSP SQLite (app-private storage — see note below) |
 
 The Room DB is the source of truth for text and metadata. The VectorStore is a search index. At query time: sqlite-vec returns `(chunk_id, distance)` → Room fetches `(chunk_text, metadata)` by those IDs.
+
+Because these are separate databases, cross-store writes are **not atomic**. To prevent drift:
+
+- Direct `ChunkDao.deleteByDocumentId()` and direct `VectorStore` mutation are internal-only primitives.
+- A `KnowledgeIndexRepository` (Task 8) owns document re-index/delete flows end-to-end.
+- `KnowledgeIndexRepository` prunes orphan vector rows and compensates failed writes so stale chunk IDs do not leak into retrieval results.
 
 **Why vectors.db is not SQLCipher-encrypted (deliberate deviation from spec §11.3):**
 `sqlite-vec-android-bundled` statically links its own native sqlite-vec extension that registers against AOSP's `android.database.sqlite.SQLiteDatabase`. SQLCipher uses a forked SQLite (`net.sqlcipher.database.SQLiteDatabase`). The two share no code and the extension cannot be loaded into the SQLCipher connection without significant native bridging work. This is not feasible within Plan 3's scope.
@@ -48,7 +62,7 @@ Security impact is minimal: `vectors.db` stores only float arrays (384 floats pe
 ## File map
 
 ```
-gradle/libs.versions.toml                               ← add security-crypto, fix sqlite-vec alias
+gradle/libs.versions.toml                               ← add security-crypto, AndroidJUnit4 ext, fix sqlite-vec alias
 
 core/data/
 ├── build.gradle.kts                                    ← add deps, ksp schema dir, androidTest block
@@ -76,10 +90,13 @@ core/data/
     │   │   ├── SmsMessage.kt                           ← data class: individual message
     │   │   └── CallLogEntry.kt                         ← data class: call log row
     │   ├── repository/
+    │   │   ├── KnowledgeIndexRepository.kt             ← only write path that mutates Room + VectorStore together
     │   │   ├── ContactsRepository.kt                   ← interface + impl (ContactsProvider)
     │   │   ├── SmsThreadRepository.kt                  ← interface + impl (SMS Provider)
     │   │   ├── CallLogRepository.kt                    ← interface + impl (CallLog.Calls)
     │   │   └── RepositoriesModule.kt                   ← Hilt bindings for repositories
+    │   ├── util/
+    │   │   └── PhoneNumberNormalizer.kt                ← E.164-when-possible normalization helper
     │   └── vector/
     │       ├── VectorResult.kt                         ← (chunkId, distance) return type
     │       ├── VectorStore.kt                          ← sqlite-vec wrapper (insert/query/delete)
@@ -87,12 +104,19 @@ core/data/
     ├── test/kotlin/com/agendroid/core/data/
     │   └── (none — all Room tests are instrumented; see androidTest)
     └── androidTest/kotlin/com/agendroid/core/data/
+        ├── db/
+        │   └── AppDatabaseEncryptionTest.kt            ← verifies SQLCipher key bootstrap + reopen path
         ├── dao/
         │   ├── ChunkDaoTest.kt
         │   ├── KnowledgeDocumentDaoTest.kt
         │   ├── ConversationSummaryDaoTest.kt
         │   ├── NoteDaoTest.kt
         │   └── ContactPreferenceDaoTest.kt
+        ├── repository/
+        │   ├── KnowledgeIndexRepositoryTest.kt         ← Room/vector consistency tests
+        │   └── ProviderRepositorySmokeTest.kt          ← exercises Contacts/SMS/CallLog adapters on device
+        ├── util/
+        │   └── PhoneNumberNormalizerTest.kt            ← normalization contract tests
         └── vector/
             └── VectorStoreTest.kt
 ```
@@ -110,12 +134,16 @@ core/data/
 Add under `[versions]`:
 ```toml
 security-crypto     = "1.0.0"
+androidx-test-ext-junit = "1.2.1"
+androidx-test-rules = "1.6.1"
 ```
 
 Add under `[libraries]` (replace the awkward `sqlite-vec-version` entry — leave it as-is for now, just add the properly-named alias below it):
 ```toml
 sqlite-vec-android  = { module = "io.github.asg017:sqlite-vec-android-bundled", version.ref = "sqlite-vec" }
 security-crypto     = { module = "androidx.security:security-crypto", version.ref = "security-crypto" }
+androidx-test-ext-junit = { module = "androidx.test.ext:junit", version.ref = "androidx-test-ext-junit" }
+androidx-test-rules = { module = "androidx.test:rules", version.ref = "androidx-test-rules" }
 ```
 
 - [ ] **Step 2: Update `core/data/build.gradle.kts`**
@@ -186,6 +214,8 @@ dependencies {
     androidTestImplementation(libs.room.testing)
     androidTestImplementation(libs.androidx.test.core)
     androidTestImplementation(libs.androidx.test.runner)
+    androidTestImplementation(libs.androidx.test.ext.junit)
+    androidTestImplementation(libs.androidx.test.rules)
     androidTestImplementation(libs.bundles.coroutines)
 }
 
@@ -199,7 +229,7 @@ cd /home/noob/agendroid
 ./gradlew :core:data:assembleDebug
 ```
 
-Expected: `BUILD SUCCESSFUL` — the module compiles (no source yet, but all deps resolve).
+Expected: `BUILD SUCCESSFUL` — the module compiles (no source yet, but all deps resolve, including AndroidJUnit4 test support).
 
 - [ ] **Step 4: Commit**
 
@@ -216,8 +246,9 @@ git commit -m "build: add security-crypto and sqlite-vec deps to :core:data"
 - Create: `core/data/src/main/kotlin/com/agendroid/core/data/db/KeystoreKeyManager.kt`
 - Create: `core/data/src/main/kotlin/com/agendroid/core/data/db/AppDatabase.kt`
 - Create: `core/data/src/main/kotlin/com/agendroid/core/data/db/DatabaseModule.kt`
+- Create: `core/data/src/androidTest/kotlin/com/agendroid/core/data/db/AppDatabaseEncryptionTest.kt`
 
-No JVM unit tests for this task — `KeystoreKeyManager` requires Android Keystore (native, can't run on JVM). It is exercised by every Room DAO instrumented test in Tasks 3–6.
+No JVM unit tests for this task — `KeystoreKeyManager` requires Android Keystore (native, can't run on JVM). Do **not** rely on the DAO tests in Tasks 3–6 for encryption coverage; those use in-memory databases and do not exercise SQLCipher or on-disk reopen behavior.
 
 - [ ] **Step 1: Create `KeystoreKeyManager.kt`**
 
@@ -339,7 +370,80 @@ object DatabaseModule {
 }
 ```
 
-- [ ] **Step 4: Verify it compiles**
+- [ ] **Step 4: Create `AppDatabaseEncryptionTest.kt`**
+
+```kotlin
+package com.agendroid.core.data.db
+
+import android.content.Context
+import androidx.room.Room
+import androidx.test.core.app.ApplicationProvider
+import androidx.test.ext.junit.runners.AndroidJUnit4
+import kotlinx.coroutines.test.runTest
+import net.sqlcipher.database.SQLiteDatabase
+import net.sqlcipher.database.SupportFactory
+import org.junit.After
+import org.junit.Assert.assertArrayEquals
+import org.junit.Assert.assertNotEquals
+import org.junit.Assert.assertTrue
+import org.junit.Test
+import org.junit.runner.RunWith
+
+@RunWith(AndroidJUnit4::class)
+class AppDatabaseEncryptionTest {
+
+    private val context = ApplicationProvider.getApplicationContext<Context>()
+    private val dbName = "app-database-encryption-test.db"
+
+    @After
+    fun cleanup() {
+        context.deleteDatabase(dbName)
+    }
+
+    @Test
+    fun keystoreKeyManager_returnsStableKeyAcrossCalls() {
+        val manager = KeystoreKeyManager(context)
+        val first = manager.getOrCreateKey()
+        val second = manager.getOrCreateKey()
+
+        assertArrayEquals(first, second)
+        assertTrue(first.size == 32)
+    }
+
+    @Test
+    fun sqlcipherDatabase_reopensWithSameKey() = runTest {
+        val keyManager = KeystoreKeyManager(context)
+        val passphrase = SQLiteDatabase.getBytes(
+            keyManager.getOrCreateKey().toString(Charsets.ISO_8859_1).toCharArray()
+        )
+        val factory = SupportFactory(passphrase)
+
+        val first = Room.databaseBuilder(context, AppDatabase::class.java, dbName)
+            .openHelperFactory(factory)
+            .build()
+        val second = Room.databaseBuilder(context, AppDatabase::class.java, dbName)
+            .openHelperFactory(factory)
+            .build()
+
+        // Opening the same file twice with the same SQLCipher key must succeed.
+        assertNotEquals(first.openHelper.writableDatabase.version, -1)
+        assertNotEquals(second.openHelper.writableDatabase.version, -1)
+
+        first.close()
+        second.close()
+    }
+}
+```
+
+- [ ] **Step 5: Run the encryption/bootstrap test**
+
+```bash
+./gradlew :core:data:connectedAndroidTest --tests "com.agendroid.core.data.db.AppDatabaseEncryptionTest"
+```
+
+Expected: 2 tests PASS.
+
+- [ ] **Step 6: Verify it compiles**
 
 ```bash
 ./gradlew :core:data:assembleDebug
@@ -347,7 +451,7 @@ object DatabaseModule {
 
 Expected: `BUILD SUCCESSFUL`.
 
-- [ ] **Step 5: Commit**
+- [ ] **Step 7: Commit**
 
 ```bash
 git add core/data/src/
@@ -378,6 +482,7 @@ import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import com.agendroid.core.data.db.AppDatabase
 import com.agendroid.core.data.entity.ChunkEntity
+import com.agendroid.core.data.entity.KnowledgeDocumentEntity
 import kotlinx.coroutines.test.runTest
 import org.junit.After
 import org.junit.Assert.assertEquals
@@ -402,29 +507,43 @@ class ChunkDaoTest {
     @After
     fun teardown() { db.close() }
 
+    private suspend fun insertDocument(idSeed: String, sourceType: String = "doc"): Long {
+        return db.knowledgeDocumentDao().insert(
+            KnowledgeDocumentEntity(
+                sourceType = sourceType,
+                sourceUri = "test://$idSeed",
+                title = "Doc $idSeed",
+                checksum = idSeed,
+            )
+        )
+    }
+
     @Test
     fun insertAll_and_getByIds_roundTrip() = runTest {
+        val documentId = insertDocument("chunks-1", sourceType = "note")
         val chunks = listOf(
-            ChunkEntity(documentId = 1L, sourceType = "note", contactFilter = null, chunkText = "hello world", chunkIndex = 0),
-            ChunkEntity(documentId = 1L, sourceType = "note", contactFilter = null, chunkText = "second chunk", chunkIndex = 1),
+            ChunkEntity(documentId = documentId, sourceType = "note", contactFilter = null, chunkText = "hello world", chunkIndex = 0),
+            ChunkEntity(documentId = documentId, sourceType = "note", contactFilter = null, chunkText = "second chunk", chunkIndex = 1),
         )
-        db.chunkDao().insertAll(chunks)
+        val insertedIds = db.chunkDao().insertAll(chunks)
 
-        val all = db.chunkDao().getByDocumentId(1L)
+        val all = db.chunkDao().getByDocumentId(documentId)
         assertEquals(2, all.size)
+        assertEquals(2, insertedIds.size)
         assertTrue(all.any { it.chunkText == "hello world" })
         assertTrue(all.any { it.chunkText == "second chunk" })
     }
 
     @Test
     fun getByIds_returnsOnlyRequestedChunks() = runTest {
+        val documentId = insertDocument("chunks-2", sourceType = "sms")
         val chunks = listOf(
-            ChunkEntity(documentId = 2L, sourceType = "sms", contactFilter = "+15550001234", chunkText = "a", chunkIndex = 0),
-            ChunkEntity(documentId = 2L, sourceType = "sms", contactFilter = "+15550001234", chunkText = "b", chunkIndex = 1),
-            ChunkEntity(documentId = 2L, sourceType = "sms", contactFilter = "+15550001234", chunkText = "c", chunkIndex = 2),
+            ChunkEntity(documentId = documentId, sourceType = "sms", contactFilter = "+15550001234", chunkText = "a", chunkIndex = 0),
+            ChunkEntity(documentId = documentId, sourceType = "sms", contactFilter = "+15550001234", chunkText = "b", chunkIndex = 1),
+            ChunkEntity(documentId = documentId, sourceType = "sms", contactFilter = "+15550001234", chunkText = "c", chunkIndex = 2),
         )
         db.chunkDao().insertAll(chunks)
-        val all = db.chunkDao().getByDocumentId(2L)
+        val all = db.chunkDao().getByDocumentId(documentId)
         val targetIds = all.filter { it.chunkText == "a" || it.chunkText == "c" }.map { it.id }
 
         val fetched = db.chunkDao().getByIds(targetIds)
@@ -434,24 +553,40 @@ class ChunkDaoTest {
 
     @Test
     fun deleteByDocumentId_removesAllChunksForDocument() = runTest {
+        val document3Id = insertDocument("chunks-3a")
+        val document4Id = insertDocument("chunks-3b")
         db.chunkDao().insertAll(listOf(
-            ChunkEntity(documentId = 3L, sourceType = "doc", contactFilter = null, chunkText = "x", chunkIndex = 0),
-            ChunkEntity(documentId = 3L, sourceType = "doc", contactFilter = null, chunkText = "y", chunkIndex = 1),
-            ChunkEntity(documentId = 4L, sourceType = "doc", contactFilter = null, chunkText = "z", chunkIndex = 0),
+            ChunkEntity(documentId = document3Id, sourceType = "doc", contactFilter = null, chunkText = "x", chunkIndex = 0),
+            ChunkEntity(documentId = document3Id, sourceType = "doc", contactFilter = null, chunkText = "y", chunkIndex = 1),
+            ChunkEntity(documentId = document4Id, sourceType = "doc", contactFilter = null, chunkText = "z", chunkIndex = 0),
         ))
-        db.chunkDao().deleteByDocumentId(3L)
+        db.chunkDao().deleteByDocumentId(document3Id)
 
-        assertTrue(db.chunkDao().getByDocumentId(3L).isEmpty())
-        assertEquals(1, db.chunkDao().getByDocumentId(4L).size)
+        assertTrue(db.chunkDao().getByDocumentId(document3Id).isEmpty())
+        assertEquals(1, db.chunkDao().getByDocumentId(document4Id).size)
     }
 
     @Test
     fun countByDocumentId_returnsCorrectCount() = runTest {
+        val documentId = insertDocument("chunks-4", sourceType = "note")
         db.chunkDao().insertAll(listOf(
-            ChunkEntity(documentId = 5L, sourceType = "note", contactFilter = null, chunkText = "p", chunkIndex = 0),
-            ChunkEntity(documentId = 5L, sourceType = "note", contactFilter = null, chunkText = "q", chunkIndex = 1),
+            ChunkEntity(documentId = documentId, sourceType = "note", contactFilter = null, chunkText = "p", chunkIndex = 0),
+            ChunkEntity(documentId = documentId, sourceType = "note", contactFilter = null, chunkText = "q", chunkIndex = 1),
         ))
-        assertEquals(2, db.chunkDao().countByDocumentId(5L))
+        assertEquals(2, db.chunkDao().countByDocumentId(documentId))
+    }
+
+    @Test
+    fun getIdsByDocumentId_returnsPersistedChunkIds() = runTest {
+        val documentId = insertDocument("chunks-5")
+        db.chunkDao().insertAll(listOf(
+            ChunkEntity(documentId = documentId, sourceType = "doc", contactFilter = null, chunkText = "alpha", chunkIndex = 0),
+            ChunkEntity(documentId = documentId, sourceType = "doc", contactFilter = null, chunkText = "beta", chunkIndex = 1),
+        ))
+
+        val ids = db.chunkDao().getIdsByDocumentId(documentId)
+        assertEquals(2, ids.size)
+        assertTrue(ids.all { it > 0L })
     }
 }
 ```
@@ -511,7 +646,7 @@ import com.agendroid.core.data.entity.ChunkEntity
 interface ChunkDao {
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
-    suspend fun insertAll(chunks: List<ChunkEntity>)
+    suspend fun insertAll(chunks: List<ChunkEntity>): List<Long>
 
     /** Fetch chunks by their IDs (used after VectorStore returns top-k chunk IDs). */
     @Query("SELECT * FROM chunks WHERE id IN (:ids)")
@@ -519,6 +654,14 @@ interface ChunkDao {
 
     @Query("SELECT * FROM chunks WHERE document_id = :documentId")
     suspend fun getByDocumentId(documentId: Long): List<ChunkEntity>
+
+    /** Internal: used by KnowledgeIndexRepository to keep VectorStore in sync with Room. */
+    @Query("SELECT id FROM chunks WHERE document_id = :documentId")
+    suspend fun getIdsByDocumentId(documentId: Long): List<Long>
+
+    /** Internal: used by KnowledgeIndexRepository.pruneOrphanVectors(). */
+    @Query("SELECT id FROM chunks")
+    suspend fun getAllIds(): List<Long>
 
     @Query("DELETE FROM chunks WHERE document_id = :documentId")
     suspend fun deleteByDocumentId(documentId: Long)
@@ -557,7 +700,7 @@ abstract class AppDatabase : RoomDatabase() {
 ./gradlew :core:data:connectedAndroidTest --tests "com.agendroid.core.data.dao.ChunkDaoTest"
 ```
 
-Expected: 4 tests PASS.
+Expected: 5 tests PASS.
 
 - [ ] **Step 7: Commit**
 
@@ -573,6 +716,7 @@ git commit -m "feat(data): add ChunkEntity + ChunkDao with instrumented tests"
 **Files:**
 - Create: `core/data/src/main/kotlin/com/agendroid/core/data/entity/KnowledgeDocumentEntity.kt`
 - Create: `core/data/src/main/kotlin/com/agendroid/core/data/dao/KnowledgeDocumentDao.kt`
+- Modify: `core/data/src/main/kotlin/com/agendroid/core/data/entity/ChunkEntity.kt`
 - Modify: `core/data/src/main/kotlin/com/agendroid/core/data/db/AppDatabase.kt`
 - Create: `core/data/src/androidTest/kotlin/com/agendroid/core/data/dao/KnowledgeDocumentDaoTest.kt`
 
@@ -684,7 +828,53 @@ data class KnowledgeDocumentEntity(
 )
 ```
 
-- [ ] **Step 3: Create `KnowledgeDocumentDao.kt`**
+- [ ] **Step 3: Update `ChunkEntity.kt` to add document FK + stable per-document ordering**
+
+Replace the file contents:
+
+```kotlin
+// core/data/src/main/kotlin/com/agendroid/core/data/entity/ChunkEntity.kt
+package com.agendroid.core.data.entity
+
+import androidx.room.ColumnInfo
+import androidx.room.Entity
+import androidx.room.ForeignKey
+import androidx.room.Index
+import androidx.room.PrimaryKey
+
+/**
+ * A RAG text chunk from a document or conversation source.
+ * The float embedding for this chunk is stored in VectorStore keyed by [id].
+ */
+@Entity(
+    tableName = "chunks",
+    foreignKeys = [
+        ForeignKey(
+            entity = KnowledgeDocumentEntity::class,
+            parentColumns = ["id"],
+            childColumns = ["document_id"],
+            onDelete = ForeignKey.CASCADE,
+        ),
+    ],
+    indices = [
+        Index("document_id"),
+        Index("contact_filter"),
+        Index(value = ["document_id", "chunk_index"], unique = true),
+    ],
+)
+data class ChunkEntity(
+    @PrimaryKey(autoGenerate = true) val id: Long = 0,
+    @ColumnInfo(name = "document_id") val documentId: Long,
+    /** "sms" | "call" | "note" | "contact" | "doc" | "calendar" */
+    @ColumnInfo(name = "source_type") val sourceType: String,
+    /** Normalized phone number for contact-scoped retrieval; null for global chunks. */
+    @ColumnInfo(name = "contact_filter") val contactFilter: String?,
+    @ColumnInfo(name = "chunk_text") val chunkText: String,
+    @ColumnInfo(name = "chunk_index") val chunkIndex: Int,
+)
+```
+
+- [ ] **Step 4: Create `KnowledgeDocumentDao.kt`**
 
 ```kotlin
 // core/data/src/main/kotlin/com/agendroid/core/data/dao/KnowledgeDocumentDao.kt
@@ -711,10 +901,13 @@ interface KnowledgeDocumentDao {
 
     @Query("SELECT * FROM knowledge_documents WHERE source_uri = :sourceUri LIMIT 1")
     suspend fun getBySourceUri(sourceUri: String): KnowledgeDocumentEntity?
+
+    @Query("SELECT * FROM knowledge_documents WHERE id = :documentId LIMIT 1")
+    suspend fun getById(documentId: Long): KnowledgeDocumentEntity?
 }
 ```
 
-- [ ] **Step 4: Update `AppDatabase.kt`**
+- [ ] **Step 5: Update `AppDatabase.kt`**
 
 ```kotlin
 // core/data/src/main/kotlin/com/agendroid/core/data/db/AppDatabase.kt
@@ -741,7 +934,7 @@ abstract class AppDatabase : RoomDatabase() {
 }
 ```
 
-- [ ] **Step 5: Run tests**
+- [ ] **Step 6: Run tests**
 
 ```bash
 ./gradlew :core:data:connectedAndroidTest --tests "com.agendroid.core.data.dao.KnowledgeDocumentDaoTest"
@@ -749,7 +942,7 @@ abstract class AppDatabase : RoomDatabase() {
 
 Expected: 5 tests PASS.
 
-- [ ] **Step 6: Commit**
+- [ ] **Step 7: Commit**
 
 ```bash
 git add core/data/src/
@@ -799,7 +992,7 @@ class ConversationSummaryDaoTest {
     @Test
     fun upsert_insertsNewSummary() = runTest {
         db.conversationSummaryDao().upsert(
-            ConversationSummaryEntity(contactId = "+15550001234", type = "sms", summary = "Discussed dinner plans")
+            ConversationSummaryEntity(contactKey = "+15550001234", type = "sms", summary = "Discussed dinner plans")
         )
         val result = db.conversationSummaryDao().get("+15550001234", "sms")
         assertNotNull(result)
@@ -809,20 +1002,20 @@ class ConversationSummaryDaoTest {
     @Test
     fun upsert_replacesExistingSummary() = runTest {
         val contact = "+15559876543"
-        db.conversationSummaryDao().upsert(ConversationSummaryEntity(contactId = contact, type = "call", summary = "First summary"))
-        db.conversationSummaryDao().upsert(ConversationSummaryEntity(contactId = contact, type = "call", summary = "Updated summary"))
+        db.conversationSummaryDao().upsert(ConversationSummaryEntity(contactKey = contact, type = "call", summary = "First summary"))
+        db.conversationSummaryDao().upsert(ConversationSummaryEntity(contactKey = contact, type = "call", summary = "Updated summary"))
 
         val result = db.conversationSummaryDao().get(contact, "call")
         assertEquals("Updated summary", result!!.summary)
     }
 
     @Test
-    fun getForContact_returnsAllTypesForContact() = runTest {
+    fun getForContactKey_returnsAllTypesForContact() = runTest {
         val contact = "+15551112222"
-        db.conversationSummaryDao().upsert(ConversationSummaryEntity(contactId = contact, type = "sms", summary = "sms context"))
-        db.conversationSummaryDao().upsert(ConversationSummaryEntity(contactId = contact, type = "call", summary = "call context"))
+        db.conversationSummaryDao().upsert(ConversationSummaryEntity(contactKey = contact, type = "sms", summary = "sms context"))
+        db.conversationSummaryDao().upsert(ConversationSummaryEntity(contactKey = contact, type = "call", summary = "call context"))
 
-        val all = db.conversationSummaryDao().getForContact(contact).first()
+        val all = db.conversationSummaryDao().getForContactKey(contact).first()
         assertEquals(2, all.size)
     }
 
@@ -844,15 +1037,15 @@ import androidx.room.Entity
 
 /**
  * AI-generated summary of a contact's SMS conversation or call history.
- * Keyed by (contactId, type) — one row per contact per type.
+ * Keyed by (contactKey, type) — one row per normalized phone/address key per type.
  * Upserted by AiCoreService after each significant exchange.
  */
 @Entity(
     tableName = "conversation_summaries",
-    primaryKeys = ["contact_id", "type"],
+    primaryKeys = ["contact_key", "type"],
 )
 data class ConversationSummaryEntity(
-    @ColumnInfo(name = "contact_id") val contactId: String,
+    @ColumnInfo(name = "contact_key") val contactKey: String,
     /** "sms" or "call" */
     val type: String,
     val summary: String,
@@ -879,11 +1072,11 @@ interface ConversationSummaryDao {
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun upsert(summary: ConversationSummaryEntity)
 
-    @Query("SELECT * FROM conversation_summaries WHERE contact_id = :contactId")
-    fun getForContact(contactId: String): Flow<List<ConversationSummaryEntity>>
+    @Query("SELECT * FROM conversation_summaries WHERE contact_key = :contactKey")
+    fun getForContactKey(contactKey: String): Flow<List<ConversationSummaryEntity>>
 
-    @Query("SELECT * FROM conversation_summaries WHERE contact_id = :contactId AND type = :type LIMIT 1")
-    suspend fun get(contactId: String, type: String): ConversationSummaryEntity?
+    @Query("SELECT * FROM conversation_summaries WHERE contact_key = :contactKey AND type = :type LIMIT 1")
+    suspend fun get(contactKey: String, type: String): ConversationSummaryEntity?
 }
 ```
 
@@ -1034,7 +1227,7 @@ class ContactPreferenceDaoTest {
 
     @Test
     fun upsert_insertsPreference() = runTest {
-        db.contactPreferenceDao().upsert(ContactPreferenceEntity(contactId = "+15550001234", smsAutonomy = "auto", callHandling = "agent"))
+        db.contactPreferenceDao().upsert(ContactPreferenceEntity(contactKey = "+15550001234", smsAutonomy = "auto", callHandling = "agent"))
         val pref = db.contactPreferenceDao().get("+15550001234")
         assertNotNull(pref)
         assertEquals("auto", pref!!.smsAutonomy)
@@ -1044,8 +1237,8 @@ class ContactPreferenceDaoTest {
     @Test
     fun upsert_replacesExistingPreference() = runTest {
         val id = "+15559998888"
-        db.contactPreferenceDao().upsert(ContactPreferenceEntity(contactId = id, smsAutonomy = "semi", callHandling = "screen"))
-        db.contactPreferenceDao().upsert(ContactPreferenceEntity(contactId = id, smsAutonomy = "manual", callHandling = "passthrough"))
+        db.contactPreferenceDao().upsert(ContactPreferenceEntity(contactKey = id, smsAutonomy = "semi", callHandling = "screen"))
+        db.contactPreferenceDao().upsert(ContactPreferenceEntity(contactKey = id, smsAutonomy = "manual", callHandling = "passthrough"))
         val pref = db.contactPreferenceDao().get(id)!!
         assertEquals("manual", pref.smsAutonomy)
         assertEquals("passthrough", pref.callHandling)
@@ -1059,7 +1252,7 @@ class ContactPreferenceDaoTest {
     @Test
     fun delete_removesPreference() = runTest {
         val id = "+15551112222"
-        db.contactPreferenceDao().upsert(ContactPreferenceEntity(contactId = id, smsAutonomy = "auto", callHandling = "agent"))
+        db.contactPreferenceDao().upsert(ContactPreferenceEntity(contactKey = id, smsAutonomy = "auto", callHandling = "agent"))
         db.contactPreferenceDao().delete(id)
         assertNull(db.contactPreferenceDao().get(id))
     }
@@ -1130,11 +1323,11 @@ import androidx.room.PrimaryKey
 
 /**
  * Per-contact override of global AI autonomy settings.
- * Global defaults apply when no row exists for a contactId.
+ * Global defaults apply when no row exists for a normalized contact key.
  */
 @Entity(tableName = "contact_preferences")
 data class ContactPreferenceEntity(
-    @PrimaryKey @ColumnInfo(name = "contact_id") val contactId: String,
+    @PrimaryKey @ColumnInfo(name = "contact_key") val contactKey: String,
     /** "auto" | "semi" | "manual" */
     @ColumnInfo(name = "sms_autonomy") val smsAutonomy: String = "semi",
     /** "agent" | "screen" | "passthrough" */
@@ -1161,11 +1354,11 @@ interface ContactPreferenceDao {
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun upsert(pref: ContactPreferenceEntity)
 
-    @Query("SELECT * FROM contact_preferences WHERE contact_id = :contactId LIMIT 1")
-    suspend fun get(contactId: String): ContactPreferenceEntity?
+    @Query("SELECT * FROM contact_preferences WHERE contact_key = :contactKey LIMIT 1")
+    suspend fun get(contactKey: String): ContactPreferenceEntity?
 
-    @Query("DELETE FROM contact_preferences WHERE contact_id = :contactId")
-    suspend fun delete(contactId: String)
+    @Query("DELETE FROM contact_preferences WHERE contact_key = :contactKey")
+    suspend fun delete(contactKey: String)
 }
 ```
 
@@ -1254,7 +1447,7 @@ object DatabaseModule {
 ./gradlew :core:data:connectedAndroidTest --tests "com.agendroid.core.data.dao.*"
 ```
 
-Expected: all 20 tests PASS (ChunkDao 4, KnowledgeDocumentDao 5, ConversationSummaryDao 4, NoteDao 3, ContactPreferenceDao 4).
+Expected: all 21 tests PASS (ChunkDao 5, KnowledgeDocumentDao 5, ConversationSummaryDao 4, NoteDao 3, ContactPreferenceDao 4).
 
 - [ ] **Step 9: Commit**
 
@@ -1267,7 +1460,7 @@ git commit -m "feat(data): add NoteEntity, ContactPreferenceEntity and their DAO
 
 ## Task 7: VectorStore (sqlite-vec)
 
-The `VectorStore` opens a private SQLite database file, loads the sqlite-vec extension, creates a `chunks_vec` virtual table, and exposes insert/query/delete. It is the only file in the project that knows about float embeddings — all callers pass `FloatArray`, get back `List<VectorResult>`.
+The `VectorStore` opens a private SQLite database file, loads the sqlite-vec extension, creates a `chunks_vec` virtual table, and exposes insert/query/delete primitives. It is the only file in the project that knows about float embeddings — all callers pass `FloatArray`, get back `List<VectorResult>`. Production code must not mutate it directly; Task 8 adds the coordinator that keeps it aligned with Room.
 
 **Files:**
 - Create: `core/data/src/main/kotlin/com/agendroid/core/data/vector/VectorResult.kt`
@@ -1345,6 +1538,14 @@ class VectorStoreTest {
         val results = store.query(FloatArray(384) { 0f }, limit = 5)
         assertTrue(results.isEmpty())
     }
+
+    @Test
+    fun listChunkIds_returnsPersistedIds() {
+        store.insert(chunkId = 10L, embedding = FloatArray(384) { 0.25f })
+        store.insert(chunkId = 20L, embedding = FloatArray(384) { 0.5f })
+
+        assertEquals(setOf(10L, 20L), store.listChunkIds())
+    }
 }
 ```
 
@@ -1370,6 +1571,7 @@ data class VectorResult(
 package com.agendroid.core.data.vector
 
 import android.content.Context
+import android.database.sqlite.SQLiteCursor
 import android.database.sqlite.SQLiteDatabase
 import io.github.asg017.sqlitevec.SqliteVecAndroid
 import java.nio.ByteBuffer
@@ -1431,10 +1633,16 @@ class VectorStore @Inject constructor(
         require(embedding.size == EMBEDDING_DIM) {
             "Expected $EMBEDDING_DIM floats, got ${embedding.size}"
         }
+        require(limit > 0) { "limit must be > 0" }
         val results = mutableListOf<VectorResult>()
-        val cursor = db.rawQuery(
-            "SELECT chunk_id, distance FROM chunks_vec WHERE embedding MATCH ? AND k = ?",
-            arrayOf(embedding.toVecBytes(), limit.toString()),
+        val cursor = db.rawQueryWithFactory(
+            { _, driver, editTable, query ->
+                query.bindBlob(1, embedding.toVecBytes())
+                SQLiteCursor(driver, editTable, query)
+            },
+            "SELECT chunk_id, distance FROM chunks_vec WHERE embedding MATCH ? AND k = $limit",
+            emptyArray(),
+            null,
         )
         cursor.use {
             while (it.moveToNext()) {
@@ -1450,6 +1658,29 @@ class VectorStore @Inject constructor(
     /** Removes the embedding for [chunkId]. Call from Dispatchers.IO. */
     fun delete(chunkId: Long) {
         db.execSQL("DELETE FROM chunks_vec WHERE chunk_id = ?", arrayOf(chunkId))
+    }
+
+    /** Removes multiple embeddings; used by KnowledgeIndexRepository compensation paths. */
+    fun deleteAll(chunkIds: List<Long>) {
+        if (chunkIds.isEmpty()) return
+        db.beginTransaction()
+        try {
+            chunkIds.forEach { delete(it) }
+            db.setTransactionSuccessful()
+        } finally {
+            db.endTransaction()
+        }
+    }
+
+    /** Returns all indexed chunk IDs. Used to prune stale vectors after partial failures. */
+    fun listChunkIds(): Set<Long> {
+        val ids = linkedSetOf<Long>()
+        db.rawQuery("SELECT chunk_id FROM chunks_vec", emptyArray()).use { cursor ->
+            while (cursor.moveToNext()) {
+                ids += cursor.getLong(0)
+            }
+        }
+        return ids
     }
 
     fun close() {
@@ -1495,7 +1726,7 @@ object VectorStoreModule {
 ./gradlew :core:data:connectedAndroidTest --tests "com.agendroid.core.data.vector.VectorStoreTest"
 ```
 
-Expected: 4 tests PASS. If sqlite-vec fails to load (native library issue), check device ABI — the `sqlite-vec-android-bundled` artifact must include the correct `.so` for the device's ABI (arm64-v8a for OnePlus 12).
+Expected: 5 tests PASS. If sqlite-vec fails to load (native library issue), check device ABI — the `sqlite-vec-android-bundled` artifact must include the correct `.so` for the device's ABI (arm64-v8a for OnePlus 12).
 
 **Troubleshooting:** If `SqliteVecAndroid` class is not found, check the exact class name in the sqlite-vec-android-bundled AAR with:
 ```bash
@@ -1511,19 +1742,241 @@ git commit -m "feat(data): add VectorStore with sqlite-vec for embedding storage
 
 ---
 
-## Task 8: Content provider repositories
+## Task 8: KnowledgeIndexRepository (Room/vector consistency)
 
-These repositories wrap Android's system content providers behind interfaces. They require granted permissions at runtime and cannot be meaningfully tested in unit tests (the content providers return device-specific data). No automated tests for this task — the repositories are integration-tested by the feature modules that use them.
+This repository is the only write path allowed to mutate both `AppDatabase` and `VectorStore`. It replaces document chunks, deletes document indexes, and prunes orphan vectors so retrieval never returns stale chunk IDs after partial failures or re-indexes.
+
+**Files:**
+- Create: `core/data/src/main/kotlin/com/agendroid/core/data/repository/KnowledgeIndexRepository.kt`
+- Create: `core/data/src/androidTest/kotlin/com/agendroid/core/data/repository/KnowledgeIndexRepositoryTest.kt`
+
+- [ ] **Step 1: Write the failing instrumented test**
+
+```kotlin
+package com.agendroid.core.data.repository
+
+import android.content.Context
+import androidx.room.Room
+import androidx.test.core.app.ApplicationProvider
+import androidx.test.ext.junit.runners.AndroidJUnit4
+import com.agendroid.core.data.db.AppDatabase
+import com.agendroid.core.data.entity.ChunkEntity
+import com.agendroid.core.data.entity.KnowledgeDocumentEntity
+import com.agendroid.core.data.vector.VectorStore
+import kotlinx.coroutines.test.runTest
+import org.junit.After
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
+import org.junit.Before
+import org.junit.Test
+import org.junit.runner.RunWith
+
+@RunWith(AndroidJUnit4::class)
+class KnowledgeIndexRepositoryTest {
+
+    private lateinit var context: Context
+    private lateinit var db: AppDatabase
+    private lateinit var vectorStore: VectorStore
+    private lateinit var repository: KnowledgeIndexRepository
+    private var documentId: Long = 0L
+
+    @Before
+    fun setup() {
+        runTest {
+            context = ApplicationProvider.getApplicationContext()
+            context.deleteDatabase("knowledge-index-test.db")
+            context.getDatabasePath("knowledge-index-vectors.db").delete()
+
+            db = Room.inMemoryDatabaseBuilder(context, AppDatabase::class.java)
+                .allowMainThreadQueries()
+                .build()
+            vectorStore = VectorStore(context, dbName = "knowledge-index-vectors.db")
+            repository = KnowledgeIndexRepositoryImpl(db, vectorStore)
+            documentId = db.knowledgeDocumentDao().insert(
+                KnowledgeDocumentEntity(
+                    sourceType = "pdf",
+                    sourceUri = "file:///doc.pdf",
+                    title = "Doc",
+                    checksum = "checksum",
+                )
+            )
+        }
+    }
+
+    @After
+    fun teardown() {
+        db.close()
+        vectorStore.close()
+        context.getDatabasePath("knowledge-index-vectors.db").delete()
+    }
+
+    @Test
+    fun replaceDocumentChunks_replacesRoomRowsAndVectors() = runTest {
+        val firstChunks = listOf(
+            ChunkEntity(documentId = documentId, sourceType = "pdf", contactFilter = null, chunkText = "one", chunkIndex = 0),
+            ChunkEntity(documentId = documentId, sourceType = "pdf", contactFilter = null, chunkText = "two", chunkIndex = 1),
+        )
+        val secondChunks = listOf(
+            ChunkEntity(documentId = documentId, sourceType = "pdf", contactFilter = null, chunkText = "updated", chunkIndex = 0),
+        )
+
+        repository.replaceDocumentChunks(documentId, firstChunks, List(2) { FloatArray(384) { it.toFloat() } })
+        repository.replaceDocumentChunks(documentId, secondChunks, listOf(FloatArray(384) { 0.5f }))
+
+        assertEquals(1, db.chunkDao().getByDocumentId(documentId).size)
+        assertEquals(1, vectorStore.listChunkIds().size)
+    }
+
+    @Test
+    fun deleteDocumentIndex_removesRoomRowsAndVectors() = runTest {
+        val chunks = listOf(
+            ChunkEntity(documentId = documentId, sourceType = "pdf", contactFilter = null, chunkText = "one", chunkIndex = 0),
+        )
+        repository.replaceDocumentChunks(documentId, chunks, listOf(FloatArray(384) { 1f }))
+
+        repository.deleteDocumentIndex(documentId)
+
+        assertTrue(db.chunkDao().getByDocumentId(documentId).isEmpty())
+        assertTrue(vectorStore.listChunkIds().isEmpty())
+    }
+
+    @Test
+    fun pruneOrphanVectors_deletesVectorsMissingFromRoom() = runTest {
+        vectorStore.insert(999L, FloatArray(384) { 1f })
+
+        repository.pruneOrphanVectors()
+
+        assertTrue(vectorStore.listChunkIds().isEmpty())
+    }
+}
+```
+
+- [ ] **Step 2: Create `KnowledgeIndexRepository.kt`**
+
+```kotlin
+package com.agendroid.core.data.repository
+
+import androidx.room.withTransaction
+import com.agendroid.core.common.Result
+import com.agendroid.core.data.db.AppDatabase
+import com.agendroid.core.data.entity.ChunkEntity
+import com.agendroid.core.data.vector.VectorStore
+import javax.inject.Inject
+import javax.inject.Singleton
+
+interface KnowledgeIndexRepository {
+    suspend fun replaceDocumentChunks(
+        documentId: Long,
+        chunks: List<ChunkEntity>,
+        embeddings: List<FloatArray>,
+    ): Result<List<Long>>
+
+    suspend fun deleteDocumentIndex(documentId: Long): Result<Unit>
+
+    suspend fun pruneOrphanVectors(): Result<Unit>
+}
+
+@Singleton
+class KnowledgeIndexRepositoryImpl @Inject constructor(
+    private val db: AppDatabase,
+    private val vectorStore: VectorStore,
+) : KnowledgeIndexRepository {
+
+    override suspend fun replaceDocumentChunks(
+        documentId: Long,
+        chunks: List<ChunkEntity>,
+        embeddings: List<FloatArray>,
+    ): Result<List<Long>> {
+        if (chunks.size != embeddings.size) {
+            return Result.Failure(
+                IllegalArgumentException("chunks.size (${chunks.size}) must match embeddings.size (${embeddings.size})")
+            )
+        }
+
+        return try {
+            val existingIds = db.chunkDao().getIdsByDocumentId(documentId)
+            val insertedIds = db.withTransaction {
+                db.chunkDao().deleteByDocumentId(documentId)
+                db.chunkDao().insertAll(chunks)
+            }
+
+            try {
+                vectorStore.deleteAll(existingIds)
+                insertedIds.zip(embeddings).forEach { (chunkId, embedding) ->
+                    vectorStore.insert(chunkId, embedding)
+                }
+            } catch (t: Throwable) {
+                db.withTransaction { db.chunkDao().deleteByDocumentId(documentId) }
+                vectorStore.deleteAll(insertedIds)
+                throw t
+            }
+
+            Result.Success(insertedIds)
+        } catch (t: Throwable) {
+            Result.Failure(t)
+        }
+    }
+
+    override suspend fun deleteDocumentIndex(documentId: Long): Result<Unit> {
+        return try {
+            val existingIds = db.chunkDao().getIdsByDocumentId(documentId)
+            db.withTransaction {
+                db.chunkDao().deleteByDocumentId(documentId)
+                db.knowledgeDocumentDao().getById(documentId)?.let { db.knowledgeDocumentDao().delete(it) }
+            }
+            vectorStore.deleteAll(existingIds)
+            Result.Success(Unit)
+        } catch (t: Throwable) {
+            Result.Failure(t)
+        }
+    }
+
+    override suspend fun pruneOrphanVectors(): Result<Unit> {
+        return try {
+            val roomIds = db.chunkDao().getAllIds().toSet()
+            val orphanIds = vectorStore.listChunkIds() - roomIds
+            vectorStore.deleteAll(orphanIds.toList())
+            Result.Success(Unit)
+        } catch (t: Throwable) {
+            Result.Failure(t)
+        }
+    }
+}
+```
+
+- [ ] **Step 3: Run the consistency tests**
+
+```bash
+./gradlew :core:data:connectedAndroidTest --tests "com.agendroid.core.data.repository.KnowledgeIndexRepositoryTest"
+```
+
+Expected: 3 tests PASS.
+
+- [ ] **Step 4: Commit**
+
+```bash
+git add core/data/src/
+git commit -m "feat(data): add KnowledgeIndexRepository to coordinate Room and VectorStore"
+```
+
+---
+
+## Task 9: Content provider repositories
+
+These repositories wrap Android's system content providers behind interfaces. They require granted permissions at runtime. Unlike the earlier draft, this task includes targeted normalization tests and smoke tests so the most device-specific code is exercised directly instead of being trusted implicitly.
 
 **Files:**
 - Create: `core/data/src/main/kotlin/com/agendroid/core/data/model/ContactInfo.kt`
 - Create: `core/data/src/main/kotlin/com/agendroid/core/data/model/SmsThread.kt`
 - Create: `core/data/src/main/kotlin/com/agendroid/core/data/model/SmsMessage.kt`
 - Create: `core/data/src/main/kotlin/com/agendroid/core/data/model/CallLogEntry.kt`
+- Create: `core/data/src/main/kotlin/com/agendroid/core/data/util/PhoneNumberNormalizer.kt`
 - Create: `core/data/src/main/kotlin/com/agendroid/core/data/repository/ContactsRepository.kt`
 - Create: `core/data/src/main/kotlin/com/agendroid/core/data/repository/SmsThreadRepository.kt`
 - Create: `core/data/src/main/kotlin/com/agendroid/core/data/repository/CallLogRepository.kt`
 - Create: `core/data/src/main/kotlin/com/agendroid/core/data/repository/RepositoriesModule.kt`
+- Create: `core/data/src/androidTest/kotlin/com/agendroid/core/data/util/PhoneNumberNormalizerTest.kt`
+- Create: `core/data/src/androidTest/kotlin/com/agendroid/core/data/repository/ProviderRepositorySmokeTest.kt`
 
 - [ ] **Step 1: Create model data classes**
 
@@ -1534,7 +1987,7 @@ package com.agendroid.core.data.model
 data class ContactInfo(
     val contactId: String,
     val displayName: String,
-    /** E.164 normalized phone number, e.g. "+15550001234". */
+    /** Normalized dialable number: E.164 when possible, digits-only fallback otherwise. */
     val phoneNumber: String,
     val photoUri: String?,
 )
@@ -1546,10 +1999,12 @@ package com.agendroid.core.data.model
 
 data class SmsThread(
     val threadId: Long,
-    val recipientAddress: String,
+    /** Normalized phone/address key for contact matching and autonomy rules. */
+    val participantKey: String,
     val snippet: String,
     val date: Long,
     val unreadCount: Int,
+    val subscriptionId: Int?,
 )
 ```
 
@@ -1560,11 +2015,14 @@ package com.agendroid.core.data.model
 data class SmsMessage(
     val id: Long,
     val threadId: Long,
-    val address: String,
+    val rawAddress: String,
+    /** Normalized phone/address key for lookups and summaries. */
+    val addressKey: String,
     val body: String,
     val date: Long,
     val type: Int,  // Telephony.Sms.MESSAGE_TYPE_INBOX / _SENT / etc.
     val read: Boolean,
+    val subscriptionId: Int?,
 )
 ```
 
@@ -1574,7 +2032,8 @@ package com.agendroid.core.data.model
 
 data class CallLogEntry(
     val id: Long,
-    val number: String,
+    val rawNumber: String,
+    val numberKey: String,
     val name: String?,
     val date: Long,
     val duration: Long,
@@ -1583,7 +2042,71 @@ data class CallLogEntry(
 )
 ```
 
-- [ ] **Step 2: Create `ContactsRepository.kt`**
+- [ ] **Step 2: Create `PhoneNumberNormalizer.kt` and its contract test**
+
+```kotlin
+// core/data/src/main/kotlin/com/agendroid/core/data/util/PhoneNumberNormalizer.kt
+package com.agendroid.core.data.util
+
+import android.content.Context
+import android.telephony.PhoneNumberUtils
+import android.telephony.TelephonyManager
+import dagger.hilt.android.qualifiers.ApplicationContext
+import javax.inject.Inject
+import javax.inject.Singleton
+
+@Singleton
+class PhoneNumberNormalizer @Inject constructor(
+    @ApplicationContext private val context: Context,
+) {
+    fun normalize(raw: String?, regionIsoOverride: String? = null): String {
+        if (raw.isNullOrBlank()) return ""
+
+        val trimmed = raw.trim()
+        val regionIso = regionIsoOverride
+            ?.takeIf { it.isNotBlank() }
+            ?: context.getSystemService(TelephonyManager::class.java)
+                ?.networkCountryIso
+                ?.takeIf { it.isNotBlank() }
+            ?: context.getSystemService(TelephonyManager::class.java)
+                ?.simCountryIso
+                ?.takeIf { it.isNotBlank() }
+
+        val e164 = regionIso?.let { PhoneNumberUtils.formatNumberToE164(trimmed, it.uppercase()) }
+        val normalized = e164 ?: PhoneNumberUtils.normalizeNumber(trimmed)
+        return normalized.ifBlank { trimmed }
+    }
+}
+```
+
+```kotlin
+// core/data/src/androidTest/kotlin/com/agendroid/core/data/util/PhoneNumberNormalizerTest.kt
+package com.agendroid.core.data.util
+
+import androidx.test.core.app.ApplicationProvider
+import androidx.test.ext.junit.runners.AndroidJUnit4
+import org.junit.Assert.assertEquals
+import org.junit.Test
+import org.junit.runner.RunWith
+
+@RunWith(AndroidJUnit4::class)
+class PhoneNumberNormalizerTest {
+
+    private val normalizer = PhoneNumberNormalizer(ApplicationProvider.getApplicationContext())
+
+    @Test
+    fun normalize_formatsUsNumberToE164WhenRegionKnown() {
+        assertEquals("+14155550123", normalizer.normalize("(415) 555-0123", regionIsoOverride = "US"))
+    }
+
+    @Test
+    fun normalize_fallsBackToDigitsOnlyWhenE164Unavailable() {
+        assertEquals("4155550123", normalizer.normalize("415-555-0123", regionIsoOverride = "ZZ"))
+    }
+}
+```
+
+- [ ] **Step 3: Create `ContactsRepository.kt`**
 
 ```kotlin
 // core/data/src/main/kotlin/com/agendroid/core/data/repository/ContactsRepository.kt
@@ -1592,6 +2115,7 @@ package com.agendroid.core.data.repository
 import android.content.Context
 import android.provider.ContactsContract
 import com.agendroid.core.data.model.ContactInfo
+import com.agendroid.core.data.util.PhoneNumberNormalizer
 import dagger.hilt.android.qualifiers.ApplicationContext
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -1604,6 +2128,7 @@ interface ContactsRepository {
 @Singleton
 class ContactsRepositoryImpl @Inject constructor(
     @ApplicationContext private val context: Context,
+    private val normalizer: PhoneNumberNormalizer,
 ) : ContactsRepository {
 
     override suspend fun getByPhoneNumber(phoneNumber: String): ContactInfo? {
@@ -1627,7 +2152,7 @@ class ContactsRepositoryImpl @Inject constructor(
             ContactInfo(
                 contactId = it.getString(0),
                 displayName = it.getString(1) ?: phoneNumber,
-                phoneNumber = it.getString(2) ?: phoneNumber,
+                phoneNumber = normalizer.normalize(it.getString(2) ?: phoneNumber),
                 photoUri = it.getString(3),
             )
         }
@@ -1649,10 +2174,12 @@ class ContactsRepositoryImpl @Inject constructor(
         return cursor.use {
             val results = mutableListOf<ContactInfo>()
             while (it.moveToNext()) {
+                val normalized = normalizer.normalize(it.getString(2))
+                if (normalized.isBlank()) continue
                 results += ContactInfo(
                     contactId = it.getString(0),
                     displayName = it.getString(1) ?: it.getString(2),
-                    phoneNumber = it.getString(2),
+                    phoneNumber = normalized,
                     photoUri = it.getString(3),
                 )
             }
@@ -1662,7 +2189,7 @@ class ContactsRepositoryImpl @Inject constructor(
 }
 ```
 
-- [ ] **Step 3: Create `SmsThreadRepository.kt`**
+- [ ] **Step 4: Create `SmsThreadRepository.kt`**
 
 ```kotlin
 // core/data/src/main/kotlin/com/agendroid/core/data/repository/SmsThreadRepository.kt
@@ -1670,11 +2197,12 @@ package com.agendroid.core.data.repository
 
 import android.content.ContentValues
 import android.content.Context
-import android.net.Uri
 import android.provider.Telephony
+import android.telephony.SmsManager
 import com.agendroid.core.data.model.SmsMessage
 import com.agendroid.core.data.model.SmsThread
 import com.agendroid.core.common.Result
+import com.agendroid.core.data.util.PhoneNumberNormalizer
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flow
@@ -1689,13 +2217,19 @@ interface SmsThreadRepository {
      */
     fun getThreads(): Flow<List<SmsThread>>
     suspend fun getMessages(threadId: Long, limit: Int = 50): List<SmsMessage>
-    suspend fun sendSms(to: String, body: String): Result<Unit>
+    suspend fun sendSms(to: String, body: String, subscriptionId: Int? = null): Result<Unit>
 }
 
 @Singleton
 class SmsThreadRepositoryImpl @Inject constructor(
     @ApplicationContext private val context: Context,
+    private val normalizer: PhoneNumberNormalizer,
 ) : SmsThreadRepository {
+
+    private fun smsManagerFor(subscriptionId: Int?): SmsManager {
+        val manager = context.getSystemService(SmsManager::class.java)
+        return if (subscriptionId != null) manager.createForSubscriptionId(subscriptionId) else manager
+    }
 
     override fun getThreads(): Flow<List<SmsThread>> = flow {
         // NOTE: Telephony.Sms.Conversations.CONTENT_URI does NOT reliably expose ADDRESS
@@ -1708,6 +2242,7 @@ class SmsThreadRepositoryImpl @Inject constructor(
                 Telephony.Sms.ADDRESS,
                 Telephony.Sms.BODY,
                 Telephony.Sms.DATE,
+                Telephony.Sms.SUBSCRIPTION_ID,
             ),
             null, null,
             "${Telephony.Sms.DATE} DESC",
@@ -1719,15 +2254,18 @@ class SmsThreadRepositoryImpl @Inject constructor(
             val colAddress = it.getColumnIndex(Telephony.Sms.ADDRESS)
             val colBody    = it.getColumnIndex(Telephony.Sms.BODY)
             val colDate    = it.getColumnIndex(Telephony.Sms.DATE)
+            val colSubId   = it.getColumnIndex(Telephony.Sms.SUBSCRIPTION_ID)
             while (it.moveToNext()) {
                 val threadId = it.getLong(colThread)
                 if (!threads.containsKey(threadId)) {
+                    val rawAddress = it.getString(colAddress) ?: ""
                     threads[threadId] = SmsThread(
                         threadId = threadId,
-                        recipientAddress = it.getString(colAddress) ?: "",
+                        participantKey = normalizer.normalize(rawAddress),
                         snippet = (it.getString(colBody) ?: "").take(80),
                         date = it.getLong(colDate),
                         unreadCount = 0,  // computed separately if needed
+                        subscriptionId = if (colSubId >= 0 && !it.isNull(colSubId)) it.getInt(colSubId) else null,
                     )
                 }
             }
@@ -1746,6 +2284,7 @@ class SmsThreadRepositoryImpl @Inject constructor(
                 Telephony.Sms.DATE,
                 Telephony.Sms.TYPE,
                 Telephony.Sms.READ,
+                Telephony.Sms.SUBSCRIPTION_ID,
             ),
             "${Telephony.Sms.THREAD_ID} = ?",
             arrayOf(threadId.toString()),
@@ -1758,23 +2297,24 @@ class SmsThreadRepositoryImpl @Inject constructor(
                 messages += SmsMessage(
                     id = it.getLong(0),
                     threadId = it.getLong(1),
-                    address = it.getString(2) ?: "",
+                    rawAddress = it.getString(2) ?: "",
+                    addressKey = normalizer.normalize(it.getString(2)),
                     body = it.getString(3) ?: "",
                     date = it.getLong(4),
                     type = it.getInt(5),
                     read = it.getInt(6) == 1,
+                    subscriptionId = if (!it.isNull(7)) it.getInt(7) else null,
                 )
             }
             messages
         }
     }
 
-    override suspend fun sendSms(to: String, body: String): Result<Unit> {
+    override suspend fun sendSms(to: String, body: String, subscriptionId: Int?): Result<Unit> {
         return try {
-            // Send first — if it throws, nothing is written to the SMS provider.
-            // SmsManager.getDefault() is deprecated on API 31+; use getSystemService for correct SIM selection.
-            context.getSystemService(android.telephony.SmsManager::class.java)
+            smsManagerFor(subscriptionId)
                 .sendTextMessage(to, null, body, null, null)
+
             // Record the sent message only after a successful send call.
             val values = ContentValues().apply {
                 put(Telephony.Sms.ADDRESS, to)
@@ -1782,6 +2322,7 @@ class SmsThreadRepositoryImpl @Inject constructor(
                 put(Telephony.Sms.DATE, System.currentTimeMillis())
                 put(Telephony.Sms.TYPE, Telephony.Sms.MESSAGE_TYPE_SENT)
                 put(Telephony.Sms.READ, 1)
+                subscriptionId?.let { put(Telephony.Sms.SUBSCRIPTION_ID, it) }
             }
             context.contentResolver.insert(Telephony.Sms.Sent.CONTENT_URI, values)
             Result.Success(Unit)
@@ -1792,7 +2333,7 @@ class SmsThreadRepositoryImpl @Inject constructor(
 }
 ```
 
-- [ ] **Step 4: Create `CallLogRepository.kt`**
+- [ ] **Step 5: Create `CallLogRepository.kt`**
 
 ```kotlin
 // core/data/src/main/kotlin/com/agendroid/core/data/repository/CallLogRepository.kt
@@ -1801,6 +2342,7 @@ package com.agendroid.core.data.repository
 import android.content.Context
 import android.provider.CallLog
 import com.agendroid.core.data.model.CallLogEntry
+import com.agendroid.core.data.util.PhoneNumberNormalizer
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flow
@@ -1815,20 +2357,21 @@ interface CallLogRepository {
 @Singleton
 class CallLogRepositoryImpl @Inject constructor(
     @ApplicationContext private val context: Context,
+    private val normalizer: PhoneNumberNormalizer,
 ) : CallLogRepository {
 
     override fun getCallLog(limit: Int): Flow<List<CallLogEntry>> = flow {
-        emit(query(selection = null, selectionArgs = null, limit = limit))
+        emit(query(limit = limit))
     }
 
-    override suspend fun getCallsFromNumber(phoneNumber: String, limit: Int): List<CallLogEntry> =
-        query(
-            selection = "${CallLog.Calls.NUMBER} = ?",
-            selectionArgs = arrayOf(phoneNumber),
-            limit = limit,
-        )
+    override suspend fun getCallsFromNumber(phoneNumber: String, limit: Int): List<CallLogEntry> {
+        val target = normalizer.normalize(phoneNumber)
+        return query(limit = maxOf(limit * 5, 50))
+            .filter { it.numberKey == target }
+            .take(limit)
+    }
 
-    private fun query(selection: String?, selectionArgs: Array<String>?, limit: Int): List<CallLogEntry> {
+    private fun query(limit: Int): List<CallLogEntry> {
         val cursor = context.contentResolver.query(
             CallLog.Calls.CONTENT_URI,
             arrayOf(
@@ -1839,17 +2382,19 @@ class CallLogRepositoryImpl @Inject constructor(
                 CallLog.Calls.DURATION,
                 CallLog.Calls.TYPE,
             ),
-            selection,
-            selectionArgs,
+            null,
+            null,
             "${CallLog.Calls.DATE} DESC LIMIT $limit",
         ) ?: return emptyList()
 
         return cursor.use {
             val entries = mutableListOf<CallLogEntry>()
             while (it.moveToNext()) {
+                val rawNumber = it.getString(1) ?: ""
                 entries += CallLogEntry(
                     id = it.getLong(0),
-                    number = it.getString(1) ?: "",
+                    rawNumber = rawNumber,
+                    numberKey = normalizer.normalize(rawNumber),
                     name = it.getString(2),
                     date = it.getLong(3),
                     duration = it.getLong(4),
@@ -1862,7 +2407,7 @@ class CallLogRepositoryImpl @Inject constructor(
 }
 ```
 
-- [ ] **Step 5: Create `RepositoriesModule.kt`**
+- [ ] **Step 6: Create `RepositoriesModule.kt`**
 
 ```kotlin
 // core/data/src/main/kotlin/com/agendroid/core/data/repository/RepositoriesModule.kt
@@ -1879,6 +2424,9 @@ import javax.inject.Singleton
 abstract class RepositoriesModule {
 
     @Binds @Singleton
+    abstract fun bindKnowledgeIndexRepository(impl: KnowledgeIndexRepositoryImpl): KnowledgeIndexRepository
+
+    @Binds @Singleton
     abstract fun bindContactsRepository(impl: ContactsRepositoryImpl): ContactsRepository
 
     @Binds @Singleton
@@ -1889,23 +2437,91 @@ abstract class RepositoriesModule {
 }
 ```
 
-- [ ] **Step 6: Build and verify**
+- [ ] **Step 7: Create `ProviderRepositorySmokeTest.kt`**
+
+```kotlin
+package com.agendroid.core.data.repository
+
+import android.Manifest
+import androidx.test.core.app.ApplicationProvider
+import androidx.test.ext.junit.runners.AndroidJUnit4
+import androidx.test.rule.GrantPermissionRule
+import com.agendroid.core.data.util.PhoneNumberNormalizer
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.test.runTest
+import org.junit.Assert.assertTrue
+import org.junit.Rule
+import org.junit.Test
+import org.junit.runner.RunWith
+
+@RunWith(AndroidJUnit4::class)
+class ProviderRepositorySmokeTest {
+
+    private val context = ApplicationProvider.getApplicationContext<android.content.Context>()
+    private val normalizer = PhoneNumberNormalizer(context)
+
+    @get:Rule
+    val permissions: GrantPermissionRule = GrantPermissionRule.grant(
+        Manifest.permission.READ_CONTACTS,
+        Manifest.permission.READ_SMS,
+        Manifest.permission.READ_CALL_LOG,
+    )
+
+    @Test
+    fun contactsRepository_queryDoesNotCrash_andReturnsNormalizedNumbers() = runTest {
+        val repo = ContactsRepositoryImpl(context, normalizer)
+        val contacts = repo.getAll()
+        assertTrue(contacts.all { it.phoneNumber.isBlank() || !it.phoneNumber.contains(' ') })
+    }
+
+    @Test
+    fun smsRepository_queriesDoNotCrash_andExposeNormalizedKeys() = runTest {
+        val repo = SmsThreadRepositoryImpl(context, normalizer)
+        val threads = repo.getThreads().first()
+        assertTrue(threads.all { !it.participantKey.contains(' ') })
+
+        val firstThread = threads.firstOrNull()
+        if (firstThread != null) {
+            val messages = repo.getMessages(firstThread.threadId, limit = 5)
+            assertTrue(messages.all { !it.addressKey.contains(' ') })
+        }
+    }
+
+    @Test
+    fun callLogRepository_queryDoesNotCrash_andExposeNormalizedKeys() = runTest {
+        val repo = CallLogRepositoryImpl(context, normalizer)
+        val entries = repo.getCallLog(limit = 10).first()
+        assertTrue(entries.all { !it.numberKey.contains(' ') })
+    }
+}
+```
+
+- [ ] **Step 8: Build and verify**
 
 ```bash
 ./gradlew :core:data:assembleDebug
 ```
 
-Expected: `BUILD SUCCESSFUL`. No automated test run for this task — the repositories are exercised by feature module integration tests in Plans 7–8.
+Expected: `BUILD SUCCESSFUL`.
 
-- [ ] **Step 7: Run all instrumented tests one final time**
+- [ ] **Step 9: Run repository-specific and full instrumented tests**
 
 ```bash
+./gradlew :core:data:connectedAndroidTest --tests "com.agendroid.core.data.util.PhoneNumberNormalizerTest"
+./gradlew :core:data:connectedAndroidTest --tests "com.agendroid.core.data.repository.ProviderRepositorySmokeTest"
 ./gradlew :core:data:connectedAndroidTest
 ```
 
-Expected: all DAO tests and VectorStore tests PASS.
+Expected: normalization tests PASS, provider smoke tests PASS, and the full `:core:data` instrumented suite PASS.
 
-- [ ] **Step 8: Commit**
+Manual verification still required for actual SMS sending because that depends on a live SIM and default-SMS role:
+
+1. Install the debug app on a physical dual-SIM device.
+2. Make the app the default SMS handler.
+3. Invoke `SmsThreadRepository.sendSms(..., subscriptionId = primarySubId)` and `subscriptionId = secondarySubId`.
+4. Confirm the outbound message is sent on the requested SIM and appears in the sent provider.
+
+- [ ] **Step 10: Commit**
 
 ```bash
 git add core/data/src/
