@@ -79,8 +79,14 @@ class KnowledgeIndexRepositoryImpl @Inject constructor(
                 db.chunkDao().insertAll(chunks)
             }
 
-            // 3. Remove old vectors.
-            vectorStore.deleteAll(existingIds)
+            // 3. Remove old vectors (non-fatal: orphans will be cleaned by pruneOrphanVectors).
+            try {
+                vectorStore.deleteAll(existingIds)
+            } catch (t: Throwable) {
+                // Old vectors become orphans — pruneOrphanVectors() will clean them up.
+                // Do not fail the operation; new chunk inserts proceed below.
+                android.util.Log.w("KnowledgeIndexRepo", "Failed to delete old vectors; orphans will be pruned", t)
+            }
 
             // 4. Insert new vectors; compensate if any insertion fails.
             val insertedIds = mutableListOf<Long>()
