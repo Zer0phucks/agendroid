@@ -20,3 +20,8 @@
 
 # Superpowers brainstorm session files
 .superpowers/
+
+venv
+
+# Git worktrees
+.worktrees/
