@@ -8,6 +8,7 @@ plugins {
 android {
     namespace  = "com.agendroid.core.data"
     compileSdk = 35
+    ndkVersion = "27.0.12077973"
     defaultConfig {
         minSdk = 31
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
@@ -19,6 +20,12 @@ android {
     kotlinOptions { jvmTarget = "17" }
     testOptions {
         unitTests.isReturnDefaultValues = true
+    }
+    externalNativeBuild {
+        cmake {
+            path = file("CMakeLists.txt")
+            version = "3.22.1"
+        }
     }
 }
 
@@ -43,9 +50,7 @@ dependencies {
     // SQLCipher key storage
     implementation(libs.security.crypto)
 
-    // sqlite-vec vector store — loadable .so approach; Maven AAR does not exist yet.
-    // Task 7 will integrate the raw .so files from GitHub releases.
-    // implementation(libs.sqlite.vec.android)  // TODO(Task 7): uncomment once AAR is available
+    // sqlite-vec is integrated via JNI (CMakeLists.txt) — no Maven artifact needed.
 
     // WorkManager (RAG ingestion workers live here)
     implementation(libs.workmanager.ktx)
