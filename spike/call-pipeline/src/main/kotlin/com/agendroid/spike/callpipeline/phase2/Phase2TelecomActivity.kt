@@ -1,6 +1,7 @@
 // spike/call-pipeline/src/main/kotlin/com/agendroid/spike/callpipeline/phase2/Phase2TelecomActivity.kt
 package com.agendroid.spike.callpipeline.phase2
 
+import android.app.role.RoleManager
 import android.media.AudioManager
 import android.media.AudioRecord
 import android.media.AudioFormat
@@ -8,7 +9,9 @@ import android.media.MediaRecorder
 import android.os.Bundle
 import android.util.Log
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -25,9 +28,10 @@ class Phase2TelecomActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        val roleManager = getSystemService(RoleManager::class.java)
         setContent {
             MaterialTheme {
-                Phase2Screen(scope, applicationContext)
+                Phase2Screen(scope, applicationContext, roleManager)
             }
         }
     }
@@ -42,10 +46,17 @@ class Phase2TelecomActivity : ComponentActivity() {
 private fun Phase2Screen(
     scope: CoroutineScope,
     context: android.content.Context,
+    roleManager: RoleManager,
 ) {
     var takeoverMs by remember { mutableStateOf<Long?>( null) }
     var log by remember { mutableStateOf("") }
     var batteryLevel by remember { mutableStateOf(-1) }
+    var isDefaultDialer by remember {
+        mutableStateOf(roleManager.isRoleHeld(RoleManager.ROLE_DIALER))
+    }
+    val roleLauncher = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) {
+        isDefaultDialer = roleManager.isRoleHeld(RoleManager.ROLE_DIALER)
+    }
 
     LaunchedEffect(Unit) {
         val monitor = BatteryMonitor(context)
@@ -65,12 +76,25 @@ private fun Phase2Screen(
             )
             Spacer(Modifier.height(8.dp))
         }
+        if (isDefaultDialer) {
+            Text("✅ Default phone app: SET", style = MaterialTheme.typography.bodyMedium)
+        } else {
+            Button(
+                onClick = {
+                    val intent = roleManager.createRequestRoleIntent(RoleManager.ROLE_DIALER)
+                    roleLauncher.launch(intent)
+                },
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Text("Set as Default Phone App")
+            }
+        }
+        Spacer(Modifier.height(8.dp))
         Text(
             buildString {
                 appendLine("Instructions:")
                 appendLine()
-                appendLine("1. Set this app as the default phone app:")
-                appendLine("   Settings → Apps → Default apps → Phone app → Agendroid Spike")
+                appendLine("1. Tap button above to set this app as the default phone app.")
                 appendLine()
                 appendLine("2. Before making the test call, note the battery % shown above.")
                 appendLine("   After a 10-minute call, check the % again. Gate: ≤8% drain.")
