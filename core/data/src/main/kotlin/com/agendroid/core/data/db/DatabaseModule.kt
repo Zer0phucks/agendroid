@@ -3,6 +3,7 @@ package com.agendroid.core.data.db
 
 import android.content.Context
 import androidx.room.Room
+import com.agendroid.core.data.dao.*
 import dagger.Module
 import dagger.Provides
 import dagger.hilt.InstallIn
@@ -32,4 +33,10 @@ object DatabaseModule {
             .openHelperFactory(factory)
             .build()
     }
+
+    @Provides @Singleton fun provideChunkDao(db: AppDatabase): ChunkDao = db.chunkDao()
+    @Provides @Singleton fun provideKnowledgeDocumentDao(db: AppDatabase): KnowledgeDocumentDao = db.knowledgeDocumentDao()
+    @Provides @Singleton fun provideConversationSummaryDao(db: AppDatabase): ConversationSummaryDao = db.conversationSummaryDao()
+    @Provides @Singleton fun provideNoteDao(db: AppDatabase): NoteDao = db.noteDao()
+    @Provides @Singleton fun provideContactPreferenceDao(db: AppDatabase): ContactPreferenceDao = db.contactPreferenceDao()
 }
