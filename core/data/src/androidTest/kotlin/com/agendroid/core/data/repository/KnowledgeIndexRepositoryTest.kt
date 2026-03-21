@@ -8,6 +8,8 @@ import com.agendroid.core.data.db.AppDatabase
 import com.agendroid.core.data.entity.ChunkEntity
 import com.agendroid.core.data.entity.KnowledgeDocumentEntity
 import com.agendroid.core.data.vector.VectorStore
+import com.agendroid.core.common.Result
+import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.test.runTest
 import org.junit.After
 import org.junit.Assert.assertEquals
@@ -27,7 +29,7 @@ class KnowledgeIndexRepositoryTest {
 
     @Before
     fun setup() {
-        runTest {
+        runBlocking {
             context = ApplicationProvider.getApplicationContext()
             context.deleteDatabase("knowledge-index-test.db")
             context.getDatabasePath("knowledge-index-vectors.db").delete()
@@ -65,8 +67,10 @@ class KnowledgeIndexRepositoryTest {
             ChunkEntity(documentId = documentId, sourceType = "pdf", contactFilter = null, chunkText = "updated", chunkIndex = 0),
         )
 
-        repository.replaceDocumentChunks(documentId, firstChunks, List(2) { FloatArray(384) { it.toFloat() } })
-        repository.replaceDocumentChunks(documentId, secondChunks, listOf(FloatArray(384) { 0.5f }))
+        val result1 = repository.replaceDocumentChunks(documentId, firstChunks, List(2) { FloatArray(384) { it.toFloat() } })
+        assertTrue("Expected Success but got $result1", result1 is Result.Success)
+        val result2 = repository.replaceDocumentChunks(documentId, secondChunks, listOf(FloatArray(384) { 0.5f }))
+        assertTrue("Expected Success but got $result2", result2 is Result.Success)
 
         assertEquals(1, db.chunkDao().getByDocumentId(documentId).size)
         assertEquals(1, vectorStore.listChunkIds().size)
@@ -77,9 +81,11 @@ class KnowledgeIndexRepositoryTest {
         val chunks = listOf(
             ChunkEntity(documentId = documentId, sourceType = "pdf", contactFilter = null, chunkText = "one", chunkIndex = 0),
         )
-        repository.replaceDocumentChunks(documentId, chunks, listOf(FloatArray(384) { 1f }))
+        val insertResult = repository.replaceDocumentChunks(documentId, chunks, listOf(FloatArray(384) { 1f }))
+        assertTrue("Expected Success but got $insertResult", insertResult is Result.Success)
 
-        repository.deleteDocumentIndex(documentId)
+        val deleteResult = repository.deleteDocumentIndex(documentId)
+        assertTrue("Expected Success but got $deleteResult", deleteResult is Result.Success)
 
         assertTrue(db.chunkDao().getByDocumentId(documentId).isEmpty())
         assertTrue(vectorStore.listChunkIds().isEmpty())
@@ -89,7 +95,8 @@ class KnowledgeIndexRepositoryTest {
     fun pruneOrphanVectors_deletesVectorsMissingFromRoom() = runTest {
         vectorStore.insert(999L, FloatArray(384) { 1f })
 
-        repository.pruneOrphanVectors()
+        val pruneResult = repository.pruneOrphanVectors()
+        assertTrue("Expected Success but got $pruneResult", pruneResult is Result.Success)
 
         assertTrue(vectorStore.listChunkIds().isEmpty())
     }

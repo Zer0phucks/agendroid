@@ -70,16 +70,15 @@ class KnowledgeIndexRepositoryImpl @Inject constructor(
         }
 
         return try {
-            // 1. Fetch existing chunk IDs so we can clean up vectors.
-            val existingIds = db.chunkDao().getIdsByDocumentId(documentId)
-
-            // 2. Room transaction: delete existing chunks, insert new ones.
-            val newIds: List<Long> = db.withTransaction {
+            // 1. Room transaction: fetch existing IDs, delete existing chunks, insert new ones.
+            val (existingIds, newIds) = db.withTransaction {
+                val existing = db.chunkDao().getIdsByDocumentId(documentId)
                 db.chunkDao().deleteByDocumentId(documentId)
-                db.chunkDao().insertAll(chunks)
+                val inserted = db.chunkDao().insertAll(chunks)
+                Pair(existing, inserted)
             }
 
-            // 3. Remove old vectors (non-fatal: orphans will be cleaned by pruneOrphanVectors).
+            // 2. Remove old vectors (non-fatal: orphans will be cleaned by pruneOrphanVectors).
             try {
                 vectorStore.deleteAll(existingIds)
             } catch (t: Throwable) {
@@ -88,17 +87,23 @@ class KnowledgeIndexRepositoryImpl @Inject constructor(
                 android.util.Log.w("KnowledgeIndexRepo", "Failed to delete old vectors; orphans will be pruned", t)
             }
 
-            // 4. Insert new vectors; compensate if any insertion fails.
+            // 3. Insert new vectors; compensate if any insertion fails.
             val insertedIds = mutableListOf<Long>()
             try {
                 newIds.zip(embeddings).forEach { (id, embedding) ->
                     vectorStore.insert(id, embedding)
                     insertedIds.add(id)
                 }
-            } catch (t: Throwable) {
-                // Compensate: roll back successfully inserted vectors.
-                vectorStore.deleteAll(insertedIds)
-                return Result.Failure(t)
+            } catch (insertError: Throwable) {
+                // Roll back Room rows
+                db.withTransaction { db.chunkDao().deleteByDocumentId(documentId) }
+                // Roll back any vectors that were inserted; swallow failure (will be pruned later)
+                try {
+                    vectorStore.deleteAll(insertedIds)
+                } catch (compensationError: Throwable) {
+                    android.util.Log.w("KnowledgeIndexRepo", "Compensation deleteAll failed; orphans will be pruned", compensationError)
+                }
+                throw insertError  // re-throw original so outer catch wraps it in Result.Failure
             }
 
             Result.Success(newIds)
@@ -121,10 +126,13 @@ class KnowledgeIndexRepositoryImpl @Inject constructor(
                 }
             }
 
-            // Remove vectors after the Room transaction succeeds.
-            vectorStore.deleteAll(chunkIds)
-
-            Result.Success(Unit)
+            // Remove vectors after the Room transaction succeeds (non-fatal: orphans pruned later).
+            try {
+                vectorStore.deleteAll(chunkIds)
+            } catch (t: Throwable) {
+                android.util.Log.w("KnowledgeIndexRepo", "Vector deleteAll failed after Room commit; orphans will be pruned", t)
+            }
+            return Result.Success(Unit)
         } catch (t: Throwable) {
             Result.Failure(t)
         }
