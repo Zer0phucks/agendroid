@@ -31,6 +31,10 @@ Java_com_agendroid_core_data_vector_VectorStoreJni_nativeOpen(
         return 0L;
     }
 
+    /* Disable runtime extension loading even if compiled in; sqlite-vec is registered
+     * at compile time via SQLITE_CORE so this API is not needed at runtime. */
+    sqlite3_db_config(db, SQLITE_DBCONFIG_ENABLE_LOAD_EXTENSION, 0, NULL);
+
     /* Register sqlite-vec extension. Built with SQLITE_CORE so it uses direct calls. */
     rc = sqlite3_vec_init(db, NULL, NULL);
     if (rc != SQLITE_OK) {
@@ -46,7 +50,7 @@ JNIEXPORT void JNICALL
 Java_com_agendroid_core_data_vector_VectorStoreJni_nativeClose(
         JNIEnv *env, jclass cls, jlong handle) {
     sqlite3 *db = (sqlite3 *)(intptr_t)handle;
-    if (db) sqlite3_close(db);
+    if (db) sqlite3_close_v2(db);
 }
 
 JNIEXPORT jint JNICALL
@@ -76,7 +80,11 @@ Java_com_agendroid_core_data_vector_VectorStoreJni_nativeInsert(
     const char *sql = "INSERT OR REPLACE INTO chunks_vec (chunk_id, embedding) VALUES (?, ?)";
     sqlite3_stmt *stmt = NULL;
     int rc = sqlite3_prepare_v2(db, sql, -1, &stmt, NULL);
-    if (rc != SQLITE_OK) { log_error("prepare insert", rc); return rc; }
+    if (rc != SQLITE_OK) {
+        log_error("prepare insert", rc);
+        (*env)->ReleaseFloatArrayElements(env, jEmbedding, floats, JNI_ABORT);
+        return rc;
+    }
 
     sqlite3_bind_int64(stmt, 1, (sqlite3_int64)chunkId);
     sqlite3_bind_blob(stmt, 2, floats, (int)(len * sizeof(float)), SQLITE_TRANSIENT);
@@ -139,7 +147,7 @@ Java_com_agendroid_core_data_vector_VectorStoreJni_nativeQuery(
     while (sqlite3_step(stmt) == SQLITE_ROW && count < limit) {
         jlong chunkId = (jlong)sqlite3_column_int64(stmt, 0);
         float dist = (float)sqlite3_column_double(stmt, 1);
-        int32_t distBits;
+        uint32_t distBits;
         memcpy(&distBits, &dist, sizeof(float));
         buf[count * 2]     = chunkId;
         buf[count * 2 + 1] = (jlong)distBits;
@@ -148,6 +156,7 @@ Java_com_agendroid_core_data_vector_VectorStoreJni_nativeQuery(
     sqlite3_finalize(stmt);
 
     jlongArray result = (*env)->NewLongArray(env, count * 2);
+    if (!result) { free(buf); return NULL; } /* OOM — pending OOME will be thrown by JVM */
     if (count > 0) {
         (*env)->SetLongArrayRegion(env, result, 0, count * 2, buf);
     }
@@ -176,6 +185,7 @@ Java_com_agendroid_core_data_vector_VectorStoreJni_nativeListIds(
     sqlite3_finalize(stmt);
 
     jlongArray result = (*env)->NewLongArray(env, count);
+    if (!result) { return NULL; } /* OOM — pending OOME will be thrown by JVM */
     if (count > 0) {
         (*env)->SetLongArrayRegion(env, result, 0, count, ids);
     }
