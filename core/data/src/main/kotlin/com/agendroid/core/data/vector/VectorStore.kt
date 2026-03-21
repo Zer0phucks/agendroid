@@ -84,6 +84,14 @@ class VectorStore @Inject constructor(
         return VectorStoreJni.nativeListIds(dbHandle).toHashSet()
     }
 
+    /**
+     * Closes the underlying sqlite3 database handle.
+     *
+     * **Thread safety:** callers must ensure that no concurrent [insert], [query], [delete],
+     * [deleteAll], or [listChunkIds] calls are in flight before invoking [close]. Calling
+     * [close] while another thread is executing a JNI operation will result in a use-after-free
+     * native crash.
+     */
     fun close() {
         val h = dbHandle
         if (h != 0L) VectorStoreJni.nativeClose(h)

@@ -12,11 +12,13 @@ target_include_directories(sqlite_vec_android PRIVATE
 )
 
 # SQLITE_CORE: compile sqlite-vec as a builtin extension (uses direct sqlite3_* calls)
-# SQLITE_ENABLE_LOAD_EXTENSION: needed by vec0's vtab implementation
 # NDEBUG: disable sqlite assertions for release performance
+# Note: SQLITE_ENABLE_LOAD_EXTENSION is intentionally omitted — sqlite-vec is registered
+# at compile time via SQLITE_CORE, so the runtime loader API is not needed and is a
+# security risk on Android. The loader is also explicitly disabled via
+# sqlite3_db_config(SQLITE_DBCONFIG_ENABLE_LOAD_EXTENSION, 0) at runtime.
 target_compile_definitions(sqlite_vec_android PRIVATE
     SQLITE_CORE
-    SQLITE_ENABLE_LOAD_EXTENSION
     NDEBUG
 )
 
