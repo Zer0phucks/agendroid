@@ -118,7 +118,10 @@ class SmsThreadRepositoryImpl @Inject constructor(
                 put(Telephony.Sms.READ, 1)
                 subscriptionId?.let { put(Telephony.Sms.SUBSCRIPTION_ID, it) }
             }
-            context.contentResolver.insert(Telephony.Sms.Sent.CONTENT_URI, values)
+            val sentUri = context.contentResolver.insert(Telephony.Sms.Sent.CONTENT_URI, values)
+            if (sentUri == null) {
+                android.util.Log.w("SmsThreadRepo", "Failed to record sent SMS in provider (not default SMS app?)")
+            }
             Result.Success(Unit)
         } catch (e: Exception) {
             Result.Failure(e)

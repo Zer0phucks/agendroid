@@ -27,12 +27,17 @@ class CallLogRepositoryImpl @Inject constructor(
 
     override suspend fun getCallsFromNumber(phoneNumber: String, limit: Int): List<CallLogEntry> {
         val target = normalizer.normalize(phoneNumber)
-        return query(limit = maxOf(limit * 5, 50))
+        return query()
             .filter { it.numberKey == target }
             .take(limit)
     }
 
-    private fun query(limit: Int): List<CallLogEntry> {
+    private fun query(limit: Int = Int.MAX_VALUE): List<CallLogEntry> {
+        val sortOrder = if (limit == Int.MAX_VALUE) {
+            "${CallLog.Calls.DATE} DESC"
+        } else {
+            "${CallLog.Calls.DATE} DESC LIMIT $limit"
+        }
         val cursor = context.contentResolver.query(
             CallLog.Calls.CONTENT_URI,
             arrayOf(
@@ -44,7 +49,7 @@ class CallLogRepositoryImpl @Inject constructor(
                 CallLog.Calls.TYPE,
             ),
             null, null,
-            "${CallLog.Calls.DATE} DESC LIMIT $limit",
+            sortOrder,
         ) ?: return emptyList()
 
         return cursor.use {
