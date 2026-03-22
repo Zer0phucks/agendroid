@@ -43,7 +43,7 @@ class ResourceMonitor @Inject constructor(
         val headroom = method.invoke(powerManager, 10) as? Float ?: -1f
         // headroom 1.0 = cool, 0.0 = critically hot. Map to Celsius range 25–42.
         if (headroom >= 0f) 25f + (1f - headroom) * 17f else -1f
-    } catch (e: Exception) { -1f }
+    } catch (_: Exception) { -1f }
 
     private fun readBattery(): Int {
         val intent = context.registerReceiver(null, IntentFilter(Intent.ACTION_BATTERY_CHANGED))
