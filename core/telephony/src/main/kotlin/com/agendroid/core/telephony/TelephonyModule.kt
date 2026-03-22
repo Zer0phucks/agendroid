@@ -16,6 +16,16 @@ object TelephonyModule {
 
     @Provides
     @Singleton
+    fun provideEmergencyNumberPolicy(): EmergencyNumberPolicy = EmergencyNumberPolicy()
+
+    @Provides
+    @Singleton
+    fun provideCallAutonomyDecider(
+        emergencyNumberPolicy: EmergencyNumberPolicy,
+    ): CallAutonomyDecider = CallAutonomyDecider(emergencyNumberPolicy)
+
+    @Provides
+    @Singleton
     fun provideSpeechRecognizer(
         @ApplicationContext context: Context,
     ): TelephonyCoordinator.SpeechRecognizer {

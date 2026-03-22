@@ -1,8 +1,6 @@
 package com.agendroid.core.telephony
 
-import javax.inject.Inject
-
-class EmergencyNumberPolicy @Inject constructor(
+class EmergencyNumberPolicy(
     private val emergencyNumbers: Set<String> = setOf("911", "112", "999"),
 ) {
     fun isEmergency(number: String?): Boolean {
