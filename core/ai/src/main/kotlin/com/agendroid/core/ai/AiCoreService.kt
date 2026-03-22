@@ -16,6 +16,7 @@ import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.shareIn
+import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import javax.inject.Inject
@@ -47,9 +48,7 @@ class AiCoreService : Service(), AiServiceInterface {
     private val llmMutex     = Mutex()
     private lateinit var llmEngine: LlmInferenceEngine
 
-    private val sharedResourceState: Flow<ResourceState> by lazy {
-        resourceMonitor.stateFlow.shareIn(serviceScope, SharingStarted.WhileSubscribed(5_000L), replay = 1)
-    }
+    private lateinit var sharedResourceState: Flow<ResourceState>
 
     // AiServiceInterface
 
@@ -81,14 +80,20 @@ class AiCoreService : Service(), AiServiceInterface {
     override fun onCreate() {
         super.onCreate()
         llmEngine = LlmInferenceEngine(applicationContext)
+        sharedResourceState = resourceMonitor.stateFlow
+            .shareIn(serviceScope, SharingStarted.WhileSubscribed(5_000L), replay = 1)
         startForeground(NOTIF_ID, buildNotification())
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int = START_STICKY
 
     override fun onDestroy() {
-        llmEngine.close()
         serviceScope.cancel()
+        // Wait for any active generateResponse to finish before releasing the native handle.
+        // runBlocking is acceptable here because onDestroy is called on the main thread
+        // and the LLM has a 30 s timeout that bounds the worst-case wait.
+        @Suppress("BlockingMethodInNonBlockingContext")
+        runBlocking { llmMutex.withLock { llmEngine.close() } }
         super.onDestroy()
     }
 

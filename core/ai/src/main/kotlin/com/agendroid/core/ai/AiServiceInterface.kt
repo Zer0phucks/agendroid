@@ -25,6 +25,9 @@ interface AiServiceInterface {
      * @param conversationHistory Previous turns for multi-turn context.
      * @param onToken           Called on each partial token. Set [done]=true to signal completion.
      *                          Called on an internal thread — do NOT touch UI from here.
+     *                          WARNING: do NOT call [generateResponse] or any service method
+     *                          from within [onToken] — the service holds an internal lock
+     *                          during generation and reentrant calls will deadlock.
      * @return The complete generated response text.
      */
     suspend fun generateResponse(
