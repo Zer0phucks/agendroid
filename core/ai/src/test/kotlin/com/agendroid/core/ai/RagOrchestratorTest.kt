@@ -62,9 +62,7 @@ class RagOrchestratorTest {
         val emptyVectorStore = mockk<VectorStore> {
             every { query(any(), any()) } returns emptyList()
         }
-        val emptyChunkDao = mockk<ChunkDao> {
-            coEvery { getByIds(emptyList()) } returns emptyList()
-        }
+        val emptyChunkDao = mockk<ChunkDao>(relaxed = true)
         val orc = RagOrchestrator(embeddingModel, emptyVectorStore, emptyChunkDao, promptBuilder)
         val prompt = orc.buildPrompt("empty store query")
         assertNotNull(prompt)

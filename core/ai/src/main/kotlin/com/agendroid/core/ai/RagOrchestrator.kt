@@ -6,6 +6,8 @@ import com.agendroid.core.data.vector.VectorStore
 import com.agendroid.core.embeddings.EmbeddingModel
 import javax.inject.Inject
 import javax.inject.Singleton
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 
 private const val TOP_K = 5
 
@@ -48,10 +50,11 @@ class RagOrchestrator @Inject constructor(
         val queryEmbedding = embeddingModel.embed(userQuery)
 
         // 2. ANN search — returns (chunkId, distance) ordered by ascending distance
-        val vectorResults = vectorStore.query(queryEmbedding, limit = TOP_K)
+        val vectorResults = withContext(Dispatchers.IO) { vectorStore.query(queryEmbedding, limit = TOP_K) }
         val chunkIds = vectorResults.map { it.chunkId }
 
         // 3. Fetch chunk text from Room (filter by contact if specified)
+        val chunkIdOrder = chunkIds.withIndex().associate { (idx, id) -> id to idx }
         val chunks = if (chunkIds.isEmpty()) emptyList()
                      else chunkDao.getByIds(chunkIds)
                          .let { rows ->
@@ -59,9 +62,10 @@ class RagOrchestrator @Inject constructor(
                                  rows.filter { it.contactFilter == contactFilter || it.contactFilter == null }
                              else rows
                          }
+                         .sortedBy { chunkIdOrder[it.id] ?: Int.MAX_VALUE }
                          .map { it.chunkText }
 
-        // 4. Assemble prompt (chunks already in relevance order from sqlite-vec)
+        // 4. Assemble prompt (chunks in ANN relevance order)
         return promptBuilder.build(
             ragChunks           = chunks,
             conversationHistory = conversationHistory,
