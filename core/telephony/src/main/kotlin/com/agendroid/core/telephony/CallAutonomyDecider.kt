@@ -1,6 +1,8 @@
 package com.agendroid.core.telephony
 
-internal class CallAutonomyDecider(
+import javax.inject.Inject
+
+class CallAutonomyDecider @Inject constructor(
     private val emergencyNumberPolicy: EmergencyNumberPolicy,
 ) {
     fun decide(
