@@ -2,6 +2,7 @@ package com.agendroid.core.embeddings
 
 import org.junit.jupiter.api.Assertions.*
 import org.junit.jupiter.api.Test
+import org.junit.jupiter.api.assertThrows
 
 class TextChunkerTest {
 
@@ -61,5 +62,15 @@ class TextChunkerTest {
         // The first chunk starts with word1; the last chunk ends with the last word
         assertTrue(chunks.first().startsWith("word1"))
         assertTrue(chunks.last().endsWith("word600"))
+    }
+
+    @Test
+    fun `chunkSize not greater than overlap throws IllegalArgumentException`() {
+        assertThrows<IllegalArgumentException> { TextChunker(chunkSize = 50, overlap = 50) }
+    }
+
+    @Test
+    fun `negative overlap throws IllegalArgumentException`() {
+        assertThrows<IllegalArgumentException> { TextChunker(chunkSize = 100, overlap = -1) }
     }
 }
