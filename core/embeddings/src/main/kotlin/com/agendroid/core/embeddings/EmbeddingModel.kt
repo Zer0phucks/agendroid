@@ -5,9 +5,12 @@ import com.agendroid.core.common.di.DefaultDispatcher
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.withContext
+// TODO: Migrate to com.google.ai.edge.litert.* when GpuDelegateFactory.Options
+//        is available on the compile classpath (LiteRT 1.0.1 classpath gap).
 import org.tensorflow.lite.Interpreter
 import org.tensorflow.lite.gpu.CompatibilityList
 import org.tensorflow.lite.gpu.GpuDelegate
+import java.io.Closeable
 import java.io.FileInputStream
 import java.nio.ByteBuffer
 import java.nio.channels.FileChannel
@@ -33,7 +36,7 @@ const val EMBEDDING_DIM = 384
 class EmbeddingModel @Inject constructor(
     @ApplicationContext private val context: Context,
     @DefaultDispatcher private val dispatcher: CoroutineDispatcher,
-) {
+) : Closeable {
     private val tokenizer: WordPieceTokenizer by lazy {
         WordPieceTokenizer.fromAssets(context)
     }
@@ -88,7 +91,14 @@ class EmbeddingModel @Inject constructor(
         output[0]
     }
 
-    fun close() {
+    /**
+     * Releases the LiteRT interpreter from memory.
+     * Safe to call multiple times. After calling [close], the interpreter will be
+     * lazily re-initialised on the next [embed] call. This is intentional — the
+     * nullable backing field pattern (rather than `by lazy`) allows clean release
+     * and optional re-acquisition (e.g. after thermal recovery).
+     */
+    override fun close() {
         _interpreter?.close()
         _interpreter = null
     }
