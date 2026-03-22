@@ -12,8 +12,9 @@
 *.apk
 *.aab
 
-# Models (large binary assets — tracked separately via Git LFS or downloaded at build time)
+# Models (large binary assets — tracked via Git LFS)
 **/*.tflite
+!core/embeddings/src/main/assets/all_minilm_l6_v2.tflite
 **/*.bin
 **/*.gguf
 **/*.ort
