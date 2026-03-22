@@ -8,6 +8,8 @@ import com.k2fsa.sherpa.onnx.OfflineTtsModelConfig
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.io.Closeable
+import java.io.File
+import java.io.FileOutputStream
 
 private const val MODEL_ASSET = "models/kokoro/model.onnx"
 private const val VOICES_ASSET = "models/kokoro/voices.bin"
@@ -35,15 +37,16 @@ class KokoroEngine(private val context: Context) : Closeable {
         check(isModelAvailable()) {
             "Kokoro model assets missing. Run the setup steps in Plan 5 to download them."
         }
+        val copiedDataDir = ensureDataDirCopied()
 
         val kokoroConfig = OfflineTtsKokoroModelConfig().apply {
             model = MODEL_ASSET
             voices = VOICES_ASSET
             tokens = TOKENS_ASSET
-            dataDir = DATA_DIR
+            dataDir = copiedDataDir
             lexicon = LEXICON_ASSET
             lang = "en-us"
-            dictDir = DATA_DIR
+            dictDir = copiedDataDir
             lengthScale = 1.0f
         }
         val modelConfig = OfflineTtsModelConfig().apply {
@@ -71,5 +74,40 @@ class KokoroEngine(private val context: Context) : Closeable {
     override fun close() {
         tts?.release()
         tts = null
+    }
+
+    private fun ensureDataDirCopied(): String {
+        val rootDir = context.getExternalFilesDir(null) ?: context.filesDir
+        val targetDir = File(rootDir, DATA_DIR)
+        copyAssetDirectoryIfNeeded(DATA_DIR, targetDir)
+        return targetDir.absolutePath
+    }
+
+    private fun copyAssetDirectoryIfNeeded(assetPath: String, target: File) {
+        val entries = context.assets.list(assetPath).orEmpty()
+        if (entries.isEmpty()) {
+            copyAssetFileIfNeeded(assetPath, target)
+            return
+        }
+
+        if (!target.exists()) {
+            target.mkdirs()
+        }
+
+        entries.forEach { child ->
+            val childAssetPath = "$assetPath/$child"
+            copyAssetDirectoryIfNeeded(childAssetPath, File(target, child))
+        }
+    }
+
+    private fun copyAssetFileIfNeeded(assetPath: String, target: File) {
+        if (target.exists() && target.length() > 0L) return
+
+        target.parentFile?.mkdirs()
+        context.assets.open(assetPath).use { input ->
+            FileOutputStream(target).use { output ->
+                input.copyTo(output)
+            }
+        }
     }
 }
