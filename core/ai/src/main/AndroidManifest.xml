@@ -1,2 +1,17 @@
 <?xml version="1.0" encoding="utf-8"?>
-<manifest />
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <!-- Required for foreground service + microphone access -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_PHONE_CALL" />
+
+    <application>
+        <service
+            android:name=".AiCoreService"
+            android:exported="false"
+            android:foregroundServiceType="microphone|phoneCall"
+            android:stopWithTask="false" />
+    </application>
+
+</manifest>
