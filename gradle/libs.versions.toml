@@ -20,6 +20,9 @@ androidx-test-core  = "1.6.1"
 androidx-test-runner = "1.6.2"
 mockk               = "1.13.13"
 junit5              = "5.11.3"
+security-crypto     = "1.0.0"
+androidx-test-ext-junit = "1.2.1"
+androidx-test-rules = "1.6.1"
 
 [libraries]
 # Kotlin + Coroutines
@@ -64,6 +67,10 @@ sqlcipher-android             = { module = "net.zetetic:sqlcipher-android", vers
 sqlite-ktx                    = { module = "androidx.sqlite:sqlite-ktx", version.ref = "sqlite-ktx" }
 # sqlite-vec ships as a prebuilt AAR — version entry for tracking only; actual dep added in Plan 3
 sqlite-vec-version            = { module = "io.github.asg017:sqlite-vec-android-bundled", version.ref = "sqlite-vec" }
+sqlite-vec-android            = { module = "io.github.asg017:sqlite-vec-android-bundled", version.ref = "sqlite-vec" }
+security-crypto               = { module = "androidx.security:security-crypto", version.ref = "security-crypto" }
+androidx-test-ext-junit       = { module = "androidx.test.ext:junit", version.ref = "androidx-test-ext-junit" }
+androidx-test-rules           = { module = "androidx.test:rules", version.ref = "androidx-test-rules" }
 
 # LiteRT (on-device ML)
 litert                        = { module = "com.google.ai.edge.litert:litert", version.ref = "litert" }
