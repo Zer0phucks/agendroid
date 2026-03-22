@@ -48,8 +48,9 @@ class LlmInferenceEngine(private val context: Context) {
      */
     suspend fun load(): Unit = withContext(Dispatchers.IO) {
         if (llm != null) return@withContext
-        val modelPath = context.filesDir.resolve(MODEL_FILE).absolutePath
-        check(context.filesDir.resolve(MODEL_FILE).exists()) {
+        val modelFile = context.filesDir.resolve(MODEL_FILE)
+        val modelPath = modelFile.absolutePath
+        check(modelFile.exists()) {
             "Gemma model not found at $modelPath. Push it with: " +
             "adb shell run-as com.agendroid cp /data/local/tmp/$MODEL_FILE " +
             "/data/data/com.agendroid/files/$MODEL_FILE"
@@ -86,16 +87,24 @@ class LlmInferenceEngine(private val context: Context) {
             .setTemperature(TEMPERATURE)
             .build()
 
-        LlmInferenceSession.createFromOptions(engine, sessionOptions).use { session ->
+        val session = LlmInferenceSession.createFromOptions(engine, sessionOptions)
+        try {
             val listener = ProgressListener<String> { partial, done ->
                 sb.append(partial)
                 onToken(partial, done)
                 if (done) latch.countDown()
             }
-
             session.addQueryChunk(prompt)
             session.generateResponseAsync(listener)
-            latch.await(TIMEOUT_SEC, TimeUnit.SECONDS)
+            val completed = latch.await(TIMEOUT_SEC, TimeUnit.SECONDS)
+            if (!completed) {
+                throw IllegalStateException(
+                    "LLM generation timed out after ${TIMEOUT_SEC}s. " +
+                    "Check model availability and device thermal state."
+                )
+            }
+        } finally {
+            session.close()
         }
 
         sb.toString()
