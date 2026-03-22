@@ -10,6 +10,9 @@ dependencyResolutionManagement {
     repositories {
         google() // includes com.google.ai.edge.litert (LiteRT)
         mavenCentral()
+        maven {
+            url = uri(rootDir.resolve("core/voice/local-maven"))
+        }
     }
 }
 

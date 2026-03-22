@@ -1,1 +1,4 @@
 *.tflite filter=lfs diff=lfs merge=lfs -text
+*.onnx filter=lfs diff=lfs merge=lfs -text
+*.bin filter=lfs diff=lfs merge=lfs -text
+core/voice/src/main/assets/models/** filter=lfs diff=lfs merge=lfs -text
