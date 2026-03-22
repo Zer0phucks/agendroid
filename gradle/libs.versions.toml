@@ -66,8 +66,6 @@ hilt-work-compiler            = { module = "androidx.hilt:hilt-compiler", versio
 # SQLCipher + sqlite-vec
 sqlcipher-android             = { module = "net.zetetic:sqlcipher-android", version.ref = "sqlcipher" }
 sqlite-ktx                    = { module = "androidx.sqlite:sqlite-ktx", version.ref = "sqlite-ktx" }
-# sqlite-vec ships as a prebuilt AAR — version entry for tracking only; actual dep added in Plan 3
-sqlite-vec-version            = { module = "io.github.asg017:sqlite-vec-android-bundled", version.ref = "sqlite-vec" }
 sqlite-vec-android            = { module = "io.github.asg017:sqlite-vec-android-bundled", version.ref = "sqlite-vec" }
 security-crypto               = { module = "androidx.security:security-crypto", version.ref = "security-crypto" }
 

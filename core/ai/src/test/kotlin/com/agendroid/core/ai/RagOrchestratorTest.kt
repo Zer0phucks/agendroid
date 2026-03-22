@@ -58,6 +58,21 @@ class RagOrchestratorTest {
     }
 
     @Test
+    fun `buildPrompt with contactFilter excludes chunks with mismatched filter`() = runTest {
+        // Chunk belongs to "+19990000000"; querying for "+15550001234" should exclude it
+        val filteredChunkDao = mockk<ChunkDao> {
+            coEvery { getByIds(listOf(1L)) } returns listOf(
+                ChunkEntity(id = 1L, documentId = 0L, sourceType = "sms",
+                            contactFilter = "+19990000000", chunkText = "secret other contact", chunkIndex = 0)
+            )
+        }
+        val orc = RagOrchestrator(embeddingModel, vectorStore, filteredChunkDao, promptBuilder)
+        val prompt = orc.buildPrompt("query", contactFilter = "+15550001234")
+        assertFalse(prompt.contains("secret other contact"),
+            "Chunk from a different contact should be excluded by contactFilter")
+    }
+
+    @Test
     fun `buildPrompt returns prompt when vectorStore returns empty`() = runTest {
         val emptyVectorStore = mockk<VectorStore> {
             every { query(any(), any()) } returns emptyList()
