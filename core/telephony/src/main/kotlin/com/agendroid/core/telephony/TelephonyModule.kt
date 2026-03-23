@@ -36,6 +36,10 @@ object TelephonyModule {
             }
 
             override suspend fun transcribe(pcm: ShortArray): String = whisperEngine.transcribe(pcm)
+
+            override fun close() {
+                whisperEngine.close()
+            }
         }
     }
 
@@ -51,6 +55,10 @@ object TelephonyModule {
             }
 
             override suspend fun synthesize(text: String): FloatArray = kokoroEngine.synthesize(text)
+
+            override fun close() {
+                kokoroEngine.close()
+            }
         }
     }
 

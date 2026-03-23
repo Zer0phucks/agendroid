@@ -76,7 +76,7 @@ class AiServiceConnector @Inject constructor(
         }
     }
 
-    fun unbind() {
+    override fun unbind() {
         val connection = serviceConnection ?: return
         if (isBound) {
             runCatching { context.unbindService(connection) }
