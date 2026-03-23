@@ -13,8 +13,11 @@ import com.agendroid.core.data.entity.*
         ConversationSummaryEntity::class,
         NoteEntity::class,
         ContactPreferenceEntity::class,
+        AppSettingsEntity::class,
+        PendingSmsReplyEntity::class,
+        IndexedSourceEntity::class,
     ],
-    version = 1,
+    version = 2,
     exportSchema = true,
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -23,4 +26,7 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun conversationSummaryDao(): ConversationSummaryDao
     abstract fun noteDao(): NoteDao
     abstract fun contactPreferenceDao(): ContactPreferenceDao
+    abstract fun appSettingsDao(): AppSettingsDao
+    abstract fun pendingSmsReplyDao(): PendingSmsReplyDao
+    abstract fun indexedSourceDao(): IndexedSourceDao
 }

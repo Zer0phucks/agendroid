@@ -17,16 +17,19 @@ class TelephonyCoordinator @Inject constructor(
 
     fun interface AiProvider {
         suspend fun get(): AiServiceInterface
+        fun unbind() {}
     }
 
     interface SpeechRecognizer {
         suspend fun load()
         suspend fun transcribe(pcm: ShortArray): String
+        fun close() {}
     }
 
     interface SpeechSynthesizer {
         suspend fun load()
         suspend fun synthesize(text: String): FloatArray
+        fun close() {}
     }
 
     private val mutex = Mutex()
@@ -78,27 +81,30 @@ class TelephonyCoordinator @Inject constructor(
                 }
 
                 repository.setAiHandling(true)
-                val aiService = aiProvider.get()
-                val response = aiService.generateResponse(
-                    userQuery = transcript,
-                    contactFilter = session.number,
-                    conversationHistory = repository.activeSession.value
-                        ?.transcript
-                        ?.map { it.text }
-                        .orEmpty(),
-                )
-                repository.appendTranscript(
-                    CallTranscriptLine(
-                        speaker = CallTranscriptLine.Speaker.ASSISTANT,
-                        text = response,
-                        timestampMs = System.currentTimeMillis(),
-                    ),
-                )
-                val samples = speechSynthesizer.synthesize(response)
-                audioBridge.playAssistantAudio(samples)
-                repository.setAiHandling(false)
-                aiTurnCount += 1
-                return response
+                try {
+                    val aiService = aiProvider.get()
+                    val response = aiService.generateResponse(
+                        userQuery = transcript,
+                        contactFilter = session.number,
+                        conversationHistory = repository.activeSession.value
+                            ?.transcript
+                            ?.map { it.text }
+                            .orEmpty(),
+                    )
+                    repository.appendTranscript(
+                        CallTranscriptLine(
+                            speaker = CallTranscriptLine.Speaker.ASSISTANT,
+                            text = response,
+                            timestampMs = System.currentTimeMillis(),
+                        ),
+                    )
+                    val samples = speechSynthesizer.synthesize(response)
+                    audioBridge.playAssistantAudio(samples)
+                    aiTurnCount += 1
+                    return response
+                } finally {
+                    repository.setAiHandling(false)
+                }
             }
         }
     }
@@ -110,6 +116,10 @@ class TelephonyCoordinator @Inject constructor(
 
     fun endSession() {
         audioBridge.stopAssistantAudio()
+        speechRecognizer.close()
+        speechSynthesizer.close()
+        aiProvider.unbind()
+        audioBridge.close()
         repository.clearSession()
         consecutiveEmptyTranscripts = 0
         aiTurnCount = 0

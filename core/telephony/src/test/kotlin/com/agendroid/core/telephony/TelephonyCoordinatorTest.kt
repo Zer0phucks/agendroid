@@ -121,6 +121,78 @@ class TelephonyCoordinatorTest {
         assertEquals(1, coordinator.consecutiveEmptyTranscripts)
     }
 
+    @Test
+    fun `end session releases ai and voice resources`() = runTest {
+        val repository = CallSessionRepository()
+        val speechRecognizer = mockk<TelephonyCoordinator.SpeechRecognizer>(relaxed = true)
+        val speechSynthesizer = mockk<TelephonyCoordinator.SpeechSynthesizer>(relaxed = true)
+        val aiProvider = mockk<TelephonyCoordinator.AiProvider>(relaxed = true)
+        val audioBridge = mockk<CallAudioBridge>(relaxed = true)
+
+        val coordinator = TelephonyCoordinator(
+            repository = repository,
+            aiProvider = aiProvider,
+            speechRecognizer = speechRecognizer,
+            speechSynthesizer = speechSynthesizer,
+            audioBridge = audioBridge,
+        )
+
+        coordinator.startSession("call-1", "5551234", CallAutonomyMode.FULL_AGENT)
+        coordinator.endSession()
+
+        assertEquals(null, repository.activeSession.value)
+        verify { speechRecognizer.close() }
+        verify { speechSynthesizer.close() }
+        verify { aiProvider.unbind() }
+        verify { audioBridge.stopAssistantAudio() }
+        verify { audioBridge.close() }
+    }
+
+    @Test
+    fun `full agent failure clears ai handling state`() = runTest {
+        val repository = CallSessionRepository()
+        val speechRecognizer = mockk<TelephonyCoordinator.SpeechRecognizer>()
+        val speechSynthesizer = mockk<TelephonyCoordinator.SpeechSynthesizer>()
+        val aiProvider = mockk<TelephonyCoordinator.AiProvider>()
+        val audioBridge = mockk<CallAudioBridge>(relaxed = true)
+        val aiService = object : AiServiceInterface {
+            override fun isModelAvailable(): Boolean = true
+            override val resourceState = emptyFlow<ResourceState>()
+
+            override suspend fun generateResponse(
+                userQuery: String,
+                contactFilter: String?,
+                conversationHistory: List<String>,
+                onToken: (partial: String, done: Boolean) -> Unit,
+            ): String = error("boom")
+        }
+
+        coEvery { speechRecognizer.load() } returns Unit
+        coEvery { speechRecognizer.transcribe(any()) } returns "Hello there"
+        coEvery { speechSynthesizer.load() } returns Unit
+        coEvery { aiProvider.get() } returns aiService
+
+        val coordinator = TelephonyCoordinator(
+            repository = repository,
+            aiProvider = aiProvider,
+            speechRecognizer = speechRecognizer,
+            speechSynthesizer = speechSynthesizer,
+            audioBridge = audioBridge,
+        )
+
+        coordinator.startSession("call-1", "5551234", CallAutonomyMode.FULL_AGENT)
+
+        val failure = try {
+            coordinator.handleCallerAudio(shortArrayOf(1, 2, 3))
+            null
+        } catch (error: IllegalStateException) {
+            error
+        }
+
+        assertTrue(failure is IllegalStateException)
+        assertFalse(repository.activeSession.value?.isAiHandling == true)
+    }
+
     private fun fakeAiService(response: String): AiServiceInterface = object : AiServiceInterface {
         override fun isModelAvailable(): Boolean = true
         override val resourceState = emptyFlow<ResourceState>()
