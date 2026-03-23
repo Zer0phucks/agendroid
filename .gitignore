@@ -21,6 +21,7 @@
 
 # Superpowers brainstorm session files
 .superpowers/
+.kotlin/
 
 venv
 
