@@ -31,6 +31,7 @@ object DatabaseModule {
         val factory = SupportOpenHelperFactory(keyManager.getOrCreateKey())
         return Room.databaseBuilder(context, AppDatabase::class.java, "agendroid.db")
             .openHelperFactory(factory)
+            .addMigrations(MIGRATION_1_2)
             .build()
     }
 
@@ -39,4 +40,7 @@ object DatabaseModule {
     @Provides @Singleton fun provideConversationSummaryDao(db: AppDatabase): ConversationSummaryDao = db.conversationSummaryDao()
     @Provides @Singleton fun provideNoteDao(db: AppDatabase): NoteDao = db.noteDao()
     @Provides @Singleton fun provideContactPreferenceDao(db: AppDatabase): ContactPreferenceDao = db.contactPreferenceDao()
+    @Provides @Singleton fun provideAppSettingsDao(db: AppDatabase): AppSettingsDao = db.appSettingsDao()
+    @Provides @Singleton fun providePendingSmsReplyDao(db: AppDatabase): PendingSmsReplyDao = db.pendingSmsReplyDao()
+    @Provides @Singleton fun provideIndexedSourceDao(db: AppDatabase): IndexedSourceDao = db.indexedSourceDao()
 }
