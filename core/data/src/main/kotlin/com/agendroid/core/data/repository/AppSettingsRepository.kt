@@ -4,6 +4,8 @@ import com.agendroid.core.data.dao.AppSettingsDao
 import com.agendroid.core.data.entity.AppSettingsEntity
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -25,22 +27,25 @@ private val DEFAULT_SETTINGS = AppSettingsEntity(
 class AppSettingsRepository @Inject constructor(
     private val dao: AppSettingsDao,
 ) {
+    /** Serialises all read-modify-write operations to prevent lost updates under concurrency. */
+    private val writeMutex = Mutex()
+
     /** Emits the current settings row; null until first write. */
     val settingsFlow: Flow<AppSettingsEntity?> = dao.getSettings()
 
-    suspend fun updateSmsMode(mode: String) {
+    suspend fun updateSmsMode(mode: String) = writeMutex.withLock {
         dao.upsertSettings(currentOrDefault().copy(smsAutonomyMode = mode))
     }
 
-    suspend fun updateCallMode(mode: String) {
+    suspend fun updateCallMode(mode: String) = writeMutex.withLock {
         dao.upsertSettings(currentOrDefault().copy(callAutonomyMode = mode))
     }
 
-    suspend fun updateAssistantEnabled(enabled: Boolean) {
+    suspend fun updateAssistantEnabled(enabled: Boolean) = writeMutex.withLock {
         dao.upsertSettings(currentOrDefault().copy(assistantEnabled = enabled))
     }
 
-    suspend fun updateSelectedModel(model: String) {
+    suspend fun updateSelectedModel(model: String) = writeMutex.withLock {
         dao.upsertSettings(currentOrDefault().copy(selectedModel = model))
     }
 
