@@ -79,6 +79,24 @@
             </intent-filter>
         </activity>
 
+        <!-- AI Core Service — persistent foreground service owning the LLM runtime.
+             foregroundServiceType covers wake-word (microphone) and call-agent (phoneCall)
+             use-cases per spec §11.1. START_STICKY ensures Android restarts it after OOM. -->
+        <service
+            android:name="com.agendroid.core.ai.AiCoreService"
+            android:exported="false"
+            android:foregroundServiceType="microphone|phoneCall" />
+
+        <!-- Boot receiver — starts AiCoreService after device reboot so the assistant
+             is available without requiring the user to open the app first. -->
+        <receiver
+            android:name=".boot.BootCompletedReceiver"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+            </intent-filter>
+        </receiver>
+
         <!-- WorkManager initializer — disable default, use Hilt initializer -->
         <provider
             android:name="androidx.startup.InitializationProvider"
