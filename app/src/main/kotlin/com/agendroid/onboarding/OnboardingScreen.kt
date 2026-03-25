@@ -143,7 +143,7 @@ fun OnboardingScreen(
 
                 OnboardingStep.Done -> DoneStep(
                     onContinue = {
-                        viewModel.onOnboardingComplete()
+                        onOnboardingComplete()
                     },
                 )
             }
