@@ -23,6 +23,7 @@ android {
 dependencies {
     implementation(project(":core:common"))
     implementation(project(":core:ai"))
+    implementation(project(":core:data"))
     implementation(project(":core:voice"))
     implementation(libs.core.ktx)
     implementation(libs.bundles.coroutines)

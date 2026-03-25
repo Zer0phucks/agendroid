@@ -3,17 +3,20 @@ package com.agendroid.core.telephony
 import android.telecom.Call
 import android.telecom.InCallService
 import android.telecom.VideoProfile
+import com.agendroid.core.data.repository.AppSettingsRepository
 import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import javax.inject.Inject
 
 @AndroidEntryPoint
 class AgendroidInCallService : InCallService() {
 
+    @Inject lateinit var appSettingsRepository: AppSettingsRepository
     @Inject lateinit var callSessionRepository: CallSessionRepository
     @Inject lateinit var telephonyCoordinator: TelephonyCoordinator
 
@@ -23,7 +26,6 @@ class AgendroidInCallService : InCallService() {
     override fun onCallAdded(call: Call) {
         super.onCallAdded(call)
         val number = call.details.handle?.schemeSpecificPart
-        val mode = CallAutonomyMode.FULL_AGENT
         val callback = object : Call.Callback() {
             override fun onStateChanged(call: Call, state: Int) {
                 if (state == Call.STATE_DISCONNECTED) {
@@ -35,6 +37,9 @@ class AgendroidInCallService : InCallService() {
         callCallbacks[call] = callback
 
         serviceScope.launch {
+            val mode = appSettingsRepository.settingsFlow.first()
+                ?.callAutonomyMode
+                .toCallAutonomyMode()
             telephonyCoordinator.startSession(
                 callId = call.hashCode().toString(),
                 number = number,

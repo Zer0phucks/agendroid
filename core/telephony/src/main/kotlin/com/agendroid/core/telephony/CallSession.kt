@@ -5,6 +5,7 @@ data class CallSession(
     val number: String?,
     val mode: CallAutonomyMode,
     val transcript: List<CallTranscriptLine> = emptyList(),
+    val isDisclosureDelivered: Boolean = false,
     val isAiHandling: Boolean = false,
     val isTakeoverRequested: Boolean = false,
 )

@@ -34,6 +34,11 @@ class CallSessionRepository @Inject constructor() {
         mutableActiveSession.value = session.copy(isAiHandling = isAiHandling)
     }
 
+    fun markDisclosureDelivered() {
+        val session = mutableActiveSession.value ?: return
+        mutableActiveSession.value = session.copy(isDisclosureDelivered = true)
+    }
+
     fun requestTakeover() {
         val session = mutableActiveSession.value ?: return
         mutableActiveSession.value = session.copy(
