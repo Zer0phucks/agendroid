@@ -26,8 +26,9 @@ class AssistantOverlayViewModel @Inject constructor(
         try {
             wakeWordDetector.load()
             wakeWordDetector.start(viewModelScope) {
-                _isListening.value = true
+                // keyword detected — handle as needed
             }
+            _isListening.value = true
         } catch (_: Exception) {
             _isListening.value = false
         }
@@ -40,6 +41,6 @@ class AssistantOverlayViewModel @Inject constructor(
 
     override fun onCleared() {
         super.onCleared()
-        wakeWordDetector.stop()
+        wakeWordDetector.close()
     }
 }

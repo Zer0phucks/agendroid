@@ -29,9 +29,9 @@ class KnowledgeBaseViewModel @Inject constructor(
     }
 
     fun onDelete(source: IndexedSourceEntity) {
-        knowledgeIngestionScheduler.enqueueDelete(source.sourceType, source.uri)
         viewModelScope.launch {
             indexedSourceRepository.delete(source)
+            knowledgeIngestionScheduler.enqueueDelete(source.sourceType, source.uri)
         }
     }
 }
